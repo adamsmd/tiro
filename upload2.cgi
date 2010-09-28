@@ -35,7 +35,8 @@ my $UPLOADS="uploads";
 my $START_DATE="start";
 my $END_DATE="end";
 my $SHOW_EMPTY="show_empty";
-#
+my $SHOW_NEW_UPLOAD="show_new_upload";
+
 my $UPLOAD="upload";
 #my $FILE="file";
 #my $USER="user";
@@ -77,7 +78,7 @@ if (defined $q->param($ACTION_DOWNLOAD)) {
 #    if (defined $q->param($ACTION_)) { validate(); }
 #    search_form();
 #    if (defined $q->param('search')) {
-search_results();
+search_results2();
 #}
 
     print $q->end_html(), "\n";
@@ -148,37 +149,91 @@ sub search_form {
 
 sub search_results {
     my $show_empty = $q->param($SHOW_EMPTY);
+    my $show_new_upload = $q->param($SHOW_NEW_UPLOAD);
 
     my $root = "root";
     my $tree = [];
     my $show_upload = 0;  # show new (only if upload is first in list)
     my $show_user = 1; #show empty (only if upload or user)
+
     foreach my $upload (uploads()) {
         my @upload = ($upload, upload_line($upload));
         path($tree, $root, @upload) if $show_upload;
+
         foreach my $user (users($upload)) {
-            my @user = ($user, $user);
+            my @user = ($user, user_line($user));
 #            my @user_upload = (@upload, @user);
             my @user_upload = (@user, @upload);
 #            my @user_upload = (@upload);
 #            my @user_upload = (@user);
 #            my @user_upload = ();
             path($tree, $root, @user_upload) if $show_user;
+
             foreach my $date (dates($upload, $user)) {
-                my @date = ("$date/$user/$upload", $date);
+                my @date = (date_key($upload, $user, $date), date_line($date));
                 # or "upload/user" or "user/date/upload", i.e., sort by
                 path($tree, $root, @user_upload, @date);
+
                 foreach my $file (files($upload,$user,$date)) {
-                    my @file = ($file, $file);
+                    my @file = ($file, file_line($file));
                     path($tree, $root, @user_upload, @date, @file);
                 }
             }
         }
-        
     }
 
     print_tree(0, $tree);
+}
 
+sub nesting {
+    my ($upload, $user, $date, $file) = @_;
+    return join(".", grep {defined $_} ($upload, $user, $date, $file));
+}
+
+sub safe {
+    return nesting(@_) le nesting(@_,"\0", "\0", "\0", "\0");
+}
+
+sub bar {
+    my ($tree, $val, @keys) = @_;
+    $tree->{nesting(@keys)} = $val if safe(@keys);
+    return @keys;
+}
+
+sub search_results2 {
+    my $show_empty = $q->param($SHOW_EMPTY);
+    my $show_new_upload = $q->param($SHOW_NEW_UPLOAD);
+
+    my $root = "root";
+    my $tree = [];
+    my $show_upload = 1;  # show new (only if upload is first in list)
+    my $show_user = 1; #show empty (only if upload or user)
+
+    my %tree;
+    my @keys = ();
+
+    foreach my $upload (uploads(@keys)) {
+        my @keys = bar(\%tree, $show_upload ? upload_line($upload) : "",
+                       @keys, $upload);
+
+        foreach my $user (users(@keys)) {
+            my @keys = bar(\%tree, $show_user ? " " . user_line($user) : "",
+                           @keys, $user);
+
+            foreach my $date (dates(@keys)) {
+                my @keys = bar(\%tree, "  " . date_line($date), @keys, $date);
+                # or "upload/user" or "user/date/upload", i.e., sort by
+
+                foreach my $file (files(@keys)) {
+                    my @keys = bar(\%tree, "   " . file_line($file), @keys, $file);
+                }
+            }
+        }
+    }
+
+    foreach my $key (sort keys %tree) {
+        print $tree{$key}, "\n";
+    }
 }
 
 # TODO: upload filename regex
@@ -193,27 +248,32 @@ sub uploads {
 }
 
 sub upload_line {
+    # TODO: validate link
     my ($upload) = @_;
     #my ($upload_name, $upload_config) = upload_config($upload);
     my ($upload_name, $upload_config) =
         ("$upload", {$UPLOAD_TITLE => "title",
                      $UPLOAD_MESSAGE => "message",
                      $UPLOAD_DUE => "due"});
-    return
-        ($q->start_form(
-             -method=>'POST',
-             -action=>$CGI_SCRIPT,
-             -enctype=>'multipart/form-data') .
-         $q->hidden(-name=>$UPLOAD, -value=>$upload_name) . "\n" . # TODO: check about stiky
-         $q->h1($upload_config->{$UPLOAD_TITLE}) . "\n" .
-         $q->p($upload_config->{$UPLOAD_MESSAGE}) . "\n" .
-         $q->p($upload_config->{$UPLOAD_DUE}) . "\n" .
+    my $text = "";
+    $text .= "\n";
+    $text .= $q->p($upload_config->{$UPLOAD_TITLE}) . "\n";
+    $text .= $q->p($upload_config->{$UPLOAD_MESSAGE}) . "\n";
+    $text .= $q->p($upload_config->{$UPLOAD_DUE}) . "\n";
+    if (1) {
+        $text .= $q->start_form(
+            -method=>'POST',
+            -action=>$CGI_SCRIPT,
+            -enctype=>'multipart/form-data');
+        $text .= $q->hidden(-name=>$UPLOAD, -value=>$upload_name) . "\n"; # TODO: check about stiky
+        # TODO: flag for whether to do upload fields
 #        for (my $i = 0; $i < $upload_config->{$UPLOAD_FILE_COUNT}; $i++) {
 #            print $q->filefield(-name=>$FILE), "\n";
 #        }
-         $q->submit() . "\n".         
-         $q->end_form());
-
+        $text .= $q->submit() . "\n";
+        $text .= $q->end_form() . "\n";
+    }
+    return $text;
 }
 
 sub users { # TODO: filter by group
@@ -229,6 +289,8 @@ sub users { # TODO: filter by group
     return intersect(@q_users, @c_users);
 }
 
+sub user_line { return $q->td($_[0]); }
+
 sub dates { # TODO: filter by start and end date only most recent
     return ("date1", "date2");
     my $start = $q->param($START_DATE);
@@ -239,6 +301,13 @@ sub dates { # TODO: filter by start and end date only most recent
     else { return @dates; }
 }
 
+# TODO: user, author, cells
+sub date_line { return $q->td($_[0]); }
+sub date_key {
+    my ($upload, $user, $date) = @_;
+    return "$date/$user/$upload";
+}
+
 #                # TODO: is overdue
 #                # TODO: zebra stripes
 sub files {
@@ -246,6 +315,7 @@ sub files {
 }
 
 sub file_line {
+    return $q->td($_[0]) . $q->td("modified");
 #                print $q->Tr(
 #                    $q->td({rowspan=>n}, [$assignment, $user, $date]),
 #                    map { $q->td(file); $q->td(size); } @files);
