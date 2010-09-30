@@ -14,11 +14,11 @@ use Date::Manip; #TODO install
 #my $DIR="/u-/adamsmd/projects/upload/tmp";
 my $DIR="demo";
 #my $GLOBAL_CONFIG_FILE=$DIR . "/global.config";
-my $GLOBAL_CONFIG_FILE="$DIR/global_config.json";
+my $GLOBAL_CONFIG_FILE="global_config.json";
 
 # CGI Constants
 my $ACTION_DOWNLOAD="download";
-my $ACTION_UPLOAD="upload";
+my $ACTION_UPLOAD="do_upload";
 my $ACTION_SEARCH="search";
 my $ACTION_VALIDATE="validate";
 
@@ -29,6 +29,7 @@ my $START_DATE="start";
 my $END_DATE="end"; # includes "last"
 my $SHOW_EMPTY="show_empty";
 my $SHOW_NEW_UPLOAD="show_new_upload";
+my $ONLY_MOST_RECENT="only_most_recent";
 
 # Upload constants
 my $UPLOAD="upload";
@@ -49,6 +50,9 @@ my $GLOBAL_UPLOAD_CONFIGS = 'upload_configs';
 my $GLOBAL_UPLOAD_FILES = 'upload_files';
 my $GLOBAL_USER_CONFIGS = 'user_configs';
 my $GLOBAL_CGI_URL = 'cgi_url';
+
+my $USER_NAME = 'user_name';
+my $USER_FULL_NAME = 'full_name';
 
 # Other constant
 my $NESTING_SEP = ',';
@@ -127,11 +131,20 @@ sub upload {
     }
 }
 
+sub filename_param {
+    my $p = $q->param($_[0]);
+    return $p unless defined $p;
+    my ($v) = $p =~ /([A-Za-z0-9]*)/;
+    return $v;
+}
+
 sub validate {
     print $q->h2('Validation'), "\n";
-    my ($upload) = $q->param($UPLOAD) =~ /([A-Za-z0-9]*)/;
-    my ($user) = $q->param($USER) =~ /([A-Za-z0-9]*)/;
-    my ($date) = $q->param($DATE) =~ /([A-Za-z0-9]*)/; # TODO: filter by "last"
+    my ($upload, $user, $date) = map {filename_param $_} ($UPLOAD, $USER, $DATE);
+#    my ($upload, $user, $date) = filename_param($UPLOAD, $USER, $DATE);
+#    my ($upload) = $q->param($UPLOAD) =~ /([A-Za-z0-9]*)/;
+#    my ($user) = $q->param($USER) =~ /([A-Za-z0-9]*)/;
+#    my ($date) = $q->param($DATE) =~ /([A-Za-z0-9]*)/; # TODO: filter by "last"
     # TODO: check that exists and permissions
 
     my $upload_config = upload_config($upload);
@@ -139,7 +152,8 @@ sub validate {
         # validator
         print "run:", join(
             ":", @$validator,
-            join('/', $global_config->{$GLOBAL_UPLOAD_FILES},
+            join('/',
+                 $global_config->{$GLOBAL_UPLOAD_FILES},
                  $upload, $user, $date)), "\n";
         # TODO: run program via system
     }
@@ -148,37 +162,40 @@ sub validate {
 sub search_form {
     print $q->h2('Search'), "\n";
 
-    print $q->start_form(
-        -method=>'POST',
-        -action=>$global_config->{$GLOBAL_CGI_URL},
-        -enctype=>'multipart/form-data');
+    print start_form();
 
     # if admin then list users else current user
     my @users = dir_list($global_config->{$GLOBAL_USER_CONFIGS});
     # TODO: unselect all
-    print "User:"; print $q->scrolling_list(
-        -name=>$USERS,
-        -values=>\@users,
-        -multiple=>1), "\n";
+    print $q->start_table();
+    print $q->Tr(map {$q->td($_)}
+                 ("User", "Assignment", "Date"));
+    print $q->start_Tr({-valign=>'top'});
+    print $q->td($q->scrolling_list(
+                     -name=>$USERS, -values=>\@users, -multiple=>1)), "\n";
 
 #    # TODO: admin controls on user-group
 #    my @groups = ("group1");
 #    print "user-group"; print $q->scrolling_list($GROUPS, \@groups);
 
-    my @uploads = dir_list($DIR . '/' . $global_config->{$GLOBAL_UPLOAD_CONFIGS});
+    my @uploads = dir_list($global_config->{$GLOBAL_UPLOAD_CONFIGS});
 
-    print "Assignment:";
-    print $q->scrolling_list(
+    print $q->td($q->scrolling_list(
         -name=>$UPLOAD,
         -values=>\@uploads,
-        -multiple=>1), "\n"; # TODO: (select some or none)
+        -multiple=>1)), "\n"; # TODO: (select some or none)
 
-#    print $q->text(-name=>$START_DATE, {class: 'date'});
-#    print $q->text(-name=>$END_DATE, {class: 'date'});
+    print $q->td(
+        "Start", $q->input({-class => 'date', -name=>$START_DATE}), $q->br,
+        "End", $q->input({-class => 'date', -name=>$END_DATE}), $q->br,
+        $q->checkbox(-name=>$ONLY_MOST_RECENT,
+                     -label=>'Only most recent'));
+# TODO: most recent != last
 
-#    print $q->checkbox(-name=>$ONLY_MOST_RECENT, -label=>'Only most recent');
+    print $q->end_Tr();
+    print $q->end_table();
 
-    print $q->submit($ACTION_SEARCH), "\n";
+    print $q->submit($ACTION_SEARCH, "Search"), "\n";
     print $q->end_form();
 
 #    window.addEvent('load', function() {
@@ -191,9 +208,11 @@ sub add_row {
 
     # Check if not a full pattern
     my ($upload, $user, $date, $file) = @keys;
+#    my @k = ($date, $file);
     my @k = ($upload, $user, $date, $file);
     foreach my $i (0..$#k) {
-        if (not defined $k[$i] and defined $k[$i+1]) { return ($depth, @keys); }
+        if (not defined $k[0] or
+            not defined $k[$i] and defined $k[$i+1]) { return ($depth, @keys); }
     }
 
     @k = grep {defined $_} @k;
@@ -206,18 +225,25 @@ sub add_row {
 sub search_results {
     my (%tree, @keys);
     my $depth = 0;
+    my $columns;
 
     foreach my $upload (uploads()) {
-        my ($depth, @keys) = add_row(\%tree, upload_line($depth, $upload), $depth, @keys, $upload);
+        my ($depth, @keys) = add_row(
+            \%tree, upload_line($depth, $upload), $depth, @keys, $upload);
         foreach my $user (users($upload)) {
-            my ($depth, @keys) = add_row(\%tree, user_line($depth, $user), $depth, @keys, $user);
+            my ($depth, @keys) = add_row(
+                \%tree, user_line($depth, $upload, $user), $depth, @keys, $user);
             foreach my $date (dates($upload, $user)) {
-                my ($depth, @keys) = add_row(\%tree, date_line($depth, $date), $depth, @keys,
-                               "$date|$user|$upload");
+                my ($depth, @keys) = add_row(
+                    \%tree, date_line($depth, $upload, $user, $date),
+                    $depth, @keys, "$date|$user|$upload");
                 # NOTE: Dates may not be unique so we add user and upload
                 # or "upload/user" or "user/date/upload", i.e., sort by
                 foreach my $file (files($upload, $user, $date)) {
-                    my ($depth, @keys) = add_row(\%tree, file_line($depth, $file), $depth, @keys, $file);
+                    $columns = $depth;
+                    my ($depth, @keys) = add_row(
+                        \%tree, file_line($depth, $upload, $user, $date, $file),
+                        $depth, @keys, $file);
                 }
             }
         }
@@ -225,6 +251,8 @@ sub search_results {
 
     print $q->h2("Results"), "\n";
     print $q->start_table({-border=>2}), "\n";
+    print $q->colgroup({-span=>$columns, -width=>"50"}), "\n";
+
     foreach my $key (sort keys %tree) {
         #print "[", $key, "]\n";
         print $tree{$key}, "\n";
@@ -238,9 +266,15 @@ sub search_results {
 #    my $show_user = 1; #show empty (only if upload or user)
 
 sub uploads {
-    my @c_uploads = dir_list($DIR . "/" . $global_config->{$GLOBAL_UPLOAD_CONFIGS});
+    my @c_uploads = dir_list($global_config->{$GLOBAL_UPLOAD_CONFIGS});
     my @q_uploads = param_list($UPLOADS, @c_uploads);
     return intersect(\@q_uploads, \@c_uploads);
+}
+
+sub nested_row {
+    my ($depth, @text) = @_;
+    return $q->Tr($depth ? $q->td({-colspan=>$depth}) . "\n" : "",
+                  map {$_."\n"} @text);
 }
 
 sub upload_line {
@@ -248,17 +282,15 @@ sub upload_line {
     my ($depth, $upload) = @_;
     #my ($upload_name, $upload_config) = upload_config($upload);
     my $upload_config = upload_config($upload);
-    my $text = "";
-    $text .= "\n";
-    $text .= $q->Tr($q->td($upload_config->{$UPLOAD_TITLE}) . "\n",
-                    $q->td($upload_config->{$UPLOAD_DUE}) . "\n");
+    my $text = "\n";
+    $text .= nested_row($depth,
+                        $q->td({-colspan=>0},
+                               $upload_config->{$UPLOAD_TITLE},
+                               " (due $upload_config->{$UPLOAD_DUE})"));
     if (1) {
         my $txt2;
 
-        $txt2 .= $q->start_form(
-            -method=>'POST',
-            -action=>$global_config->{$GLOBAL_CGI_URL},
-            -enctype=>'multipart/form-data');
+        $txt2 .= start_form();
         $txt2 .= $q->hidden(
             -name=>$UPLOAD, -value=>$upload_config->{$UPLOAD_NAME}) . "\n";
 # TODO: check about stiky
@@ -266,12 +298,15 @@ sub upload_line {
         for (my $i = 0; $i < $upload_config->{$UPLOAD_FILE_COUNT}; $i++) {
             $txt2 .= $q->filefield(-name=>$FILE) . "\n";
         }
-        $txt2 .= $q->checkbox(-name=>$ACTION_VALIDATE, -label=>"Validate")."\n";
-        $txt2 .= $q->submit($ACTION_UPLOAD) . "\n";
+        $txt2 .= $q->checkbox(-name=>$ACTION_VALIDATE,
+                              -checked=>1,
+                              -label=>"Validate")."\n";
+        $txt2 .= $q->submit($ACTION_UPLOAD, "Upload files") . "\n";
         $txt2 .= $q->end_form() . "\n";
 
-        $text .= $q->Tr($q->td($upload_config->{$UPLOAD_MESSAGE}) . "\n",
-                        $q->td({-colspan=>5}, $txt2));
+        $text .= nested_row($depth+1,
+                     $q->td({-colspan=>0}, $upload_config->{$UPLOAD_MESSAGE}));
+        $text .= nested_row($depth+1, $q->td({-colspan=>0}, $txt2));
     }
     return $text;
 }
@@ -290,9 +325,17 @@ sub users { # TODO: filter by group
     return intersect(\@q_users, \@c_users);
 }
 
+# TODO: sort by fullname vs by username
+
 sub user_line {
-    my ($depth, $user) = @_;
-    return $q->Tr($q->td({-colspan=>$depth}), $q->td($user)); }
+    my ($depth, $upload, $user) = @_;
+    my $user_config = user_config($user);
+    return nested_row(
+        $depth, $q->td(
+            {-colspan=>0},
+            $user_config->{$USER_NAME},
+            " ($user_config->{$USER_FULL_NAME})"));
+}
 
 sub dates { # TODO: filter by start and end date only most recent
     my ($upload, $user) = @_;
@@ -309,8 +352,21 @@ sub dates { # TODO: filter by start and end date only most recent
 
 # TODO: user, author, cells
 sub date_line {
-    my ($depth, $date) = @_;
-    return $q->Tr($q->td({-colspan=>$depth}), $q->td($date)); }
+    my ($depth, $upload, $user, $date) = @_;
+    return nested_row(
+        $depth,
+        $q->td({-colspan=>0},
+               # TODO: encode $upload, $user, $date
+               $date,
+               form_link("(revalidate)",
+                         $ACTION_VALIDATE, $ACTION_VALIDATE,
+                         $UPLOAD, $upload, $USER, $user, $DATE, $date)));
+#                # TODO: is overdue
+#                # TODO: zebra stripes
+#                print $q->Tr(
+#                    $q->td({rowspan=>n}, [$assignment, $user, $date]),
+#                    map { $q->td(file); $q->td(size); } @files);
+}
 
 sub files {
     my ($upload, $user, $date) = @_;
@@ -319,49 +375,49 @@ sub files {
 }
 
 sub file_line {
-    my ($depth, $file) = @_;
-    return $q->Tr($q->td({-colspan=>$depth}), $q->td($file), $q->td("modified"));
-#                # TODO: is overdue
-#                # TODO: zebra stripes
-#                print $q->Tr(
-#                    $q->td({rowspan=>n}, [$assignment, $user, $date]),
-#                    map { $q->td(file); $q->td(size); } @files);
+    my ($depth, $upload, $user, $date, $file) = @_;
+    my $filename = "$DIR/$global_config->{$GLOBAL_UPLOAD_FILES}/" .
+        "$upload/$user/$date/$file";
+    return nested_row($depth,
+                      $q->td(
+                          form_link($file,
+                                    $ACTION_DOWNLOAD, $ACTION_DOWNLOAD,
+                                    $UPLOAD, $upload,
+                                    $USER, $user,
+                                    $DATE, $date)),
+                      $q->td({-align=>'right'}, -s $filename, " bytes"));
 }
+
+sub form_link {
+    my ($text, %params) = @_;
+    my $href = "$global_config->{$GLOBAL_CGI_URL}?" .
+        join("&", map {$_ . "=" . $q->escape($params{$_})} keys %params);
+#        "?$UPLOAD=$upload&$USER=$user&$DATE=&date"},
+    return $q->a({-href=>$href}, $text);
+}
+
 
 ################
 # Config Files
 ################
 
-sub user_config {
-#    my ($user_name) = @_;
-#    return {
-#        $USER_NAME => $user_name,
-#        $USER_FULL_NAME => full_name,
-#    };
-#    my $config = read_config($global_config->{$GLOBAL_USER_CONFIGS} . '/' . $user);
-#    return $config;
+# TODO: cache configs
 
+sub user_config {
+    my ($user) = @_;
+    my $config = read_config($global_config->{$GLOBAL_USER_CONFIGS},
+                             $user);
+    # TODO: assert $config->{$USER_NAME} == $user_name (and other configs)
+    return $config;
 }
 
 sub upload_config {
-#    my ($upload_name) = @_;
-#    return {
-#        $UPLOAD_NAME => $upload_name,
-#        $UPLOAD_TITLE => 'title',
-#        $UPLOAD_MESSAGE => 'message',
-#        $UPLOAD_DUE => 'due',
-#        $UPLOAD_FILE_COUNT => '2',
 #        file_size => 'file_size',
 #        file_regex => 'file_regex',
-#        $UPLOAD_VALIDATORS => [['cmd', 'arg1', 'arg1']],
-#    };
 
     my ($upload) = @_;
-    return read_config($DIR . '/' . $global_config->{$GLOBAL_UPLOAD_CONFIGS} . '/' . $upload);
-    
+    return read_config($global_config->{$GLOBAL_UPLOAD_CONFIGS}, $upload);
     # check assignment is valid
-    # do upload names need to match? should they be inside?
-
 }
 
 sub safe_param {
@@ -371,9 +427,9 @@ sub safe_param {
 }
 
 sub read_config {
-    my ($filename) = @_;
+    my $filename = join '/', $DIR, @_;
     local $/;
-    open(my $fh, '<', $filename);
+    open(my $fh, '<', $filename) or print "No file $filename\n"; # TODO
     return decode_json(<$fh>);
 }
 
@@ -394,13 +450,10 @@ sub intersect {
 }
 
 sub start_form {
-    my $action = shift;
-    print $q->start_form(
+    return $q->start_form(
         -method=>'POST',
         -action=>$global_config->{$GLOBAL_CGI_URL},
-        -enctype=>'multipart/form-data'), "\n";
-#    $q->param($ACTION, $action);
-#    print $q->hidden(-name=>$ACTION, -value=>$action), "\n";
+        -enctype=>'multipart/form-data');
 }
 
 sub error {
@@ -413,28 +466,7 @@ sub error {
 }
 
 sub dir_list {
-    my $dir = join '/', @_;
-    my %tree = (
-#        'upload_configs' => ['upload1', 'upload2'],
-        'user_configs' => ['user1', 'user2', 'user3'],
-        'upload_files/upload1/user1' => ['date1', 'date2'],
-        'upload_files/upload1/user2' => ['date1', 'date2'],
-        'upload_files/upload1/user3' => [],
-        'upload_files/upload2/user1' => ['date1', 'date2'],
-        'upload_files/upload2/user2' => ['date1', 'date2'],
-        'upload_files/upload2/user3' => [],
-
-        'upload_files/upload1/user1/date1' => ['file1', 'file2'],
-        'upload_files/upload1/user1/date2' => ['file1', 'file2'],
-        'upload_files/upload1/user2/date1' => ['file1', 'file2'],
-        'upload_files/upload1/user2/date2' => ['file1', 'file2'],
-        'upload_files/upload2/user1/date1' => ['file1', 'file2'],
-        'upload_files/upload2/user1/date2' => ['file1', 'file2'],
-        'upload_files/upload2/user2/date1' => ['file1', 'file2'],
-        'upload_files/upload2/user2/date2' => ['file1', 'file2'],
-        );
-#    print join ".", @_ if not defined $tree{$dir};
-    return @{$tree{$dir}} if exists $tree{$dir};
+    my $dir = join '/', $DIR, @_;
 
     my $d = DirHandle->new($dir);
     if (defined $d) {
@@ -443,6 +475,10 @@ sub dir_list {
         @ds = grep {!/^\./} @ds; # skip dot files
         @ds = grep {!/~$/} @ds; # skip backup files
         return sort @ds;
+    } else {
+        # TODO: test upload dir not existing
+        print "ERROR: $dir\n"; # TODO
+        return ();
     }
 }
 
