@@ -366,27 +366,6 @@ sub upload_line {
                         $q->td({-colspan=>0},
                                $upload_config->{$UPLOAD_TITLE},
                                " (due $upload_config->{$UPLOAD_DUE})"));
-    if (1) {
-        my $txt2;
-
-        $txt2 .= start_form();
-        $txt2 .= $q->hidden(
-            -name=>$UPLOAD, -value=>$upload_config->{$UPLOAD_NAME}) . "\n";
-# TODO: check about stiky
-        # TODO: flag for whether to do upload fields
-        for (my $i = 0; $i < $upload_config->{$UPLOAD_FILE_COUNT}; $i++) {
-            $txt2 .= $q->filefield(-name=>$FILE) . "\n";
-        }
-        $txt2 .= $q->checkbox(-name=>$ACTION_VALIDATE,
-                              -checked=>1, # TODO: why isn't checked working?
-                              -label=>"Validate")."\n";
-        $txt2 .= $q->submit($ACTION_UPLOAD, "Upload files") . "\n";
-        $txt2 .= $q->end_form() . "\n";
-
-        $text .= nested_row($depth+1,
-                     $q->td({-colspan=>0}, $upload_config->{$UPLOAD_MESSAGE}));
-        $text .= nested_row($depth+1, $q->td({-colspan=>0}, $txt2));
-    }
     return $text;
 }
 
