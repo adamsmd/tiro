@@ -20,6 +20,7 @@ my $GLOBAL_CONFIG_FILE="global_config.json";
 my $ACTION_DOWNLOAD="download";
 my $ACTION_UPLOAD="do_upload";
 my $ACTION_SEARCH="search";
+my $ACTION_SEARCH_UPLOADS="search_uploads";
 my $ACTION_VALIDATE="validate";
 
 my $USERS="users";
@@ -83,6 +84,7 @@ if (defined $q->param($ACTION_DOWNLOAD)) {
     if (defined $q->param($ACTION_UPLOAD)) { upload(); }
     if (defined $q->param($ACTION_VALIDATE)) { validate(); }
     search_form();
+    if (defined $q->param($ACTION_SEARCH_UPLOADS)) { upload_results(); }
     if (defined $q->param($ACTION_SEARCH)) { search_results(); }
 
     print $q->end_html(), "\n";
@@ -141,21 +143,16 @@ sub filename_param {
 sub validate {
     print $q->h2('Validation'), "\n";
     my ($upload, $user, $date) = map {filename_param $_} ($UPLOAD, $USER, $DATE);
-#    my ($upload, $user, $date) = filename_param($UPLOAD, $USER, $DATE);
-#    my ($upload) = $q->param($UPLOAD) =~ /([A-Za-z0-9]*)/;
-#    my ($user) = $q->param($USER) =~ /([A-Za-z0-9]*)/;
-#    my ($date) = $q->param($DATE) =~ /([A-Za-z0-9]*)/; # TODO: filter by "last"
-    # TODO: check that exists and permissions
+    # TODO: filter $date by "last"
+    # TODO: check that exists and have permissions
 
     my $upload_config = upload_config($upload);
     foreach my $validator (@{$upload_config->{$UPLOAD_VALIDATORS}}) {
-        # validator
-        print "run:", join(
-            ":", @$validator,
-            join('/',
-                 $global_config->{$GLOBAL_UPLOAD_FILES},
-                 $upload, $user, $date)), "\n";
-        # TODO: run program via system
+        $ENV{PATH} = '/usr/bin'; #TODO: from config
+        my ($upload_files) =
+            $global_config->{$GLOBAL_UPLOAD_FILES} =~ /([A-Za-z0-9]*)/;
+        # TODO: why is $upload_files tainted
+        system @$validator, join('/', $upload_files, $upload, $user, $date);
     }
 }
 
@@ -210,6 +207,8 @@ sub add_row {
     my ($upload, $user, $date, $file) = @keys;
 #    my @k = ($date, $file);
     my @k = ($upload, $user, $date, $file);
+#    my @k = ($user, $upload, $date, $file);
+#    my @k = ($file);
     foreach my $i (0..$#k) {
         if (not defined $k[0] or
             not defined $k[$i] and defined $k[$i+1]) { return ($depth, @keys); }
@@ -220,6 +219,45 @@ sub add_row {
     $tree->{$key} = ("  "x$#k) . $val if $key ne "";
 
     return ($depth+1, @keys);
+}
+
+sub upload_results {
+    print $q->h2("Uploads"), "\n";
+    print $q->start_table({-border=>2}), "\n";
+#    print $q->colgroup({-span=>$columns, -width=>"50"}), "\n";
+    foreach my $upload (uploads()) {
+#        print "DOWNLOAD: $upload\n";
+#
+        my $upload_config = upload_config($upload);
+        print $q->h3($upload_config->{$UPLOAD_NAME} . ":",
+                     $upload_config->{$UPLOAD_TITLE},
+                     " (due $upload_config->{$UPLOAD_DUE})"), "\n";
+#        "\n";
+#        print $q->p("Due $upload_config->{$UPLOAD_DUE}"), "\n";
+        print $q->p($upload_config->{$UPLOAD_MESSAGE}), "\n";
+
+        print start_form();
+        print $q->hidden(
+            -name=>$UPLOAD, -value=>$upload_config->{$UPLOAD_NAME}), "\n";
+        # TODO: check about stiky
+        for (my $i = 0; $i < $upload_config->{$UPLOAD_FILE_COUNT}; $i++) {
+            print $q->p("File", $i+1 . ":", $q->filefield(-name=>$FILE)), "\n";
+        }
+        print $q->p(
+            $q->checkbox(-name=>$ACTION_VALIDATE,
+                         -checked=>1, # TODO: why isn't checked working?
+                         -label=>"Validate")), "\n";
+        print $q->submit($ACTION_UPLOAD, "Upload files"), "\n";
+        print $q->end_form(), "\n";
+#
+#        $text .= nested_row($depth+1,
+#                     $q->td({-colspan=>0}, $upload_config->{$UPLOAD_MESSAGE}));
+#        $text .= nested_row($depth+1, $q->td({-colspan=>0}, $txt2));
+#    }
+#
+
+    }
+    print $q->end_table(), "\n";
 }
 
 sub search_results {
@@ -243,7 +281,7 @@ sub search_results {
                     $columns = $depth;
                     my ($depth, @keys) = add_row(
                         \%tree, file_line($depth, $upload, $user, $date, $file),
-                        $depth, @keys, $file);
+                        $depth, @keys, "$date|$user|$upload|$file");
                 }
             }
         }
@@ -264,6 +302,47 @@ sub search_results {
 #    my $show_new_upload = $q->param($SHOW_NEW_UPLOAD);
 #    my $show_upload = 1;  # show new (only if upload is first in list)
 #    my $show_user = 1; #show empty (only if upload or user)
+
+sub uniq_by {
+    my ($fun, @xs) = @_;
+    my %ht;
+    foreach my $i (@xs) { $ht{&$fun($i)} = $i; }
+    return values %ht;
+}
+
+sub uniq { return keys %{{ map { $_ => $_ } @_ }}; }
+
+#sub search_results2 {
+#    my @rows = map {
+#        my $upload = $_;
+#        map {
+#            my $user = $_;
+#            map {
+#                my $date = $_;
+#                map {
+#                    my $file = $_;
+#                    {upload => $upload, user => $user,
+#                     date => $date, file => $file}
+#                } files($upload, $user, $date)
+#            } dates($upload, $user)
+#        } users ($upload)
+#    } uploads();
+#
+#    for my $depth (0..$#group_by) {
+#        my @fields = @group_by[0..$depth];
+#        my @headers = uniq_by \@fields @rows;
+#        foreach my $header (@headers) {
+#            if ($fields[$depth] eq 'upload')upload_line(\%rows, $depth, $header);
+#            if ($fields[$depth] eq 'users') users_line(\%rows, $depth, $header);
+#
+#        }
+#    }
+#
+##    add file lines;
+#
+##    print all with ordering;
+#
+#}
 
 sub uploads {
     my @c_uploads = dir_list($global_config->{$GLOBAL_UPLOAD_CONFIGS});
@@ -299,7 +378,7 @@ sub upload_line {
             $txt2 .= $q->filefield(-name=>$FILE) . "\n";
         }
         $txt2 .= $q->checkbox(-name=>$ACTION_VALIDATE,
-                              -checked=>1,
+                              -checked=>1, # TODO: why isn't checked working?
                               -label=>"Validate")."\n";
         $txt2 .= $q->submit($ACTION_UPLOAD, "Upload files") . "\n";
         $txt2 .= $q->end_form() . "\n";
@@ -340,7 +419,13 @@ sub user_line {
 sub dates { # TODO: filter by start and end date only most recent
     my ($upload, $user) = @_;
 
-    my @dates = dir_list($global_config->{$GLOBAL_UPLOAD_FILES}, $upload, $user);
+    my @dates =
+        dir_list($global_config->{$GLOBAL_UPLOAD_FILES}, $upload, $user);
+
+    if ($#dates != -1 and $q->param($ONLY_MOST_RECENT)) {
+        @dates = ($dates[$#dates]);
+    }
+    
     return @dates;
 
     # TODO
