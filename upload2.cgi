@@ -85,7 +85,7 @@ if (defined $q->param($ACTION_DOWNLOAD)) {
     if (defined $q->param($ACTION_VALIDATE)) { validate(); }
     search_form();
     if (defined $q->param($ACTION_SEARCH_UPLOADS)) { upload_results(); }
-    if (defined $q->param($ACTION_SEARCH)) { search_results(); }
+    if (defined $q->param($ACTION_SEARCH)) { search_results3(); }
 
     print $q->end_html(), "\n";
 }
@@ -193,6 +193,7 @@ sub search_form {
     print $q->end_table();
 
     print $q->submit($ACTION_SEARCH, "Search"), "\n";
+    print $q->submit($ACTION_SEARCH_UPLOADS, "Search Uploads"), "\n";
     print $q->end_form();
 
 #    window.addEvent('load', function() {
@@ -328,6 +329,8 @@ sub uniq { return keys %{{ map { $_ => $_ } @_ }}; }
 #        } users ($upload)
 #    } uploads();
 #
+#    
+#
 #    for my $depth (0..$#group_by) {
 #        my @fields = @group_by[0..$depth];
 #        my @headers = uniq_by \@fields @rows;
@@ -343,6 +346,59 @@ sub uniq { return keys %{{ map { $_ => $_ } @_ }}; }
 ##    print all with ordering;
 #
 #}
+
+sub search_results3 {
+    my %rows;
+    foreach my $upload (uploads()) {
+        my $upload_config = upload_config($upload);
+        foreach my $user (users($upload)) {
+            my $user_config = user_config($user);
+            foreach my $date (dates($upload, $user)) {
+                my $key = "$upload\0$user\0$date";
+
+                $rows{$key} = $q->start_Tr();
+                $rows{$key} .=
+                    join " ",
+                    map {$q->td($_)} (
+                        $upload, $upload_config->{$UPLOAD_TITLE},
+                        $user, $user_config->{$USER_FULL_NAME},
+                        $date, 
+                        form_link(
+                            "(revalidate)",
+                            $ACTION_VALIDATE, $ACTION_VALIDATE,
+                            $UPLOAD, $upload, $USER, $user, $DATE, $date));
+                my $first = 1;
+                foreach my $file (sort (files($upload, $user, $date))) {
+#                foreach my $file (()) {
+                    unless ($first) {
+                        $rows{$key} .= $q->end_Tr() . $q->start_Tr();
+                        $rows{$key} .= $q->td({colspan=>6});
+                    }
+                    $first = 0;
+                    my $filename =
+                        "$DIR/$global_config->{$GLOBAL_UPLOAD_FILES}/" .
+                        "$upload/$user/$date/$file";
+
+                    $rows{$key} .= join " ", map {$q->td($_)} (
+                        form_link($file,
+                                  $ACTION_DOWNLOAD, $ACTION_DOWNLOAD,
+                                  $UPLOAD, $upload,
+                                  $USER, $user,
+                                  $DATE, $date),
+                        (-s $filename) . " bytes");
+                }
+                $rows{$key} .= $q->end_Tr();
+            }
+        }
+    }
+
+    print $q->h2("Results"), "\n";
+    print $q->start_table({-border=>2}), "\n";
+    foreach my $key (sort keys %rows) {
+        print $rows{$key}, "\n";
+    }
+    print $q->end_table(), "\n";
+}
 
 sub uploads {
     my @c_uploads = dir_list($global_config->{$GLOBAL_UPLOAD_CONFIGS});
