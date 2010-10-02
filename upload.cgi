@@ -1,34 +1,39 @@
-#! /usr/bin/perl -wT
+#! /usr/bin/perl -T
 
+use warnings;
 use strict;
 $|++;
 
-use CGI q/-nostiky -private_tempfiles/;
+# Modules from Core
+use CGI q/-private_tempfiles/;
 use File::Copy;
 use File::Path;
-use JSON; # install
 use DirHandle;
 use FileHandle;
-use Date::Manip; #TODO install
 use Memoize;
 
-# TODO: taint checking
-#       -param
-#       -dir_list
-#       -config file contents
+# Modules not from Core
+use JSON;
+use Date::Manip;
 
-# TODO: -override
-# TODO: select multiple validators
-# TODO: if none, then all?
-# TODO: sort by fullname vs by username
+# Future features:
+#  - select subset of checkers to run
+#  - groups
 
+# TODO: sort by (e.g. full name)
+# TODO: print "all checkers passed"
+# TODO: file_name regex
 # TODO: assert $config->{$USER_NAME} == $user_name (and other configs)
 # TODO: check configs are valid
-
-    # TODO: filter by group (as list)
-    #my @c_groups = (); # TODO
-    #my @groups = filenames_param($GROUPS, @c_groups);
-
+# TODO: Must be able to show student interface to admin
+#       or make it clear what the student doesn't see
+# TODO: Print "upload completed at ..."
+# TODO: unselect all
+#    window.addEvent('load', function() {
+#        new DatePicker('.demo_vista', { pickerClass: 'datepicker_vista' });
+# TODO: is overdue
+# TODO: zebra stripes
+# TODO: Admin
 
 # File Paths
 #my $DIR="/u-/adamsmd/projects/upload/tmp";
@@ -36,54 +41,53 @@ my $DIR="demo";
 my $GLOBAL_CONFIG_FILE="global_config.json";
 
 # CGI Constants
-my $ACTION_DOWNLOAD="download";
-my $ACTION_UPLOAD="do_upload";
-my $ACTION_SEARCH="search";
-my $ACTION_SEARCH_UPLOADS="search_uploads";
-my $ACTION_VALIDATE="validate";
+my $ACTION_DOWNLOAD_FILE="download_file";
+my $ACTION_UPLOAD_FILES="upload_files";
+my $ACTION_FIND_FILES="find_files";
+my $ACTION_FIND_FOLDERS="find_folders";
+my $ACTION_CHECK_FOLDER="check_folder";
 
 my $USERS="users";
 my $GROUPS="groups";
-my $UPLOADS="uploads";
-my $START_DATE="start_date"; # includes "any"
-my $END_DATE="end_date"; # includes "any"
-my $SHOW_EMPTY="show_empty";
-my $SHOW_NEW_UPLOAD="show_new_upload";
+my $FOLDERS="folders";
+my $START_DATE="start_date";
+my $END_DATE="end_date";
 my $ONLY_MOST_RECENT="only_most_recent";
 
-# Upload constants
-my $UPLOAD="upload";
+# Upload/download constants
+my $FOLDER="folder";
 my $USER="user";
-my $FILE="file";
+my $UPLOAD_FILE="upload_file";
+my $DOWNLOAD_FILE="download_file";
 my $DATE="date";
 
-# CONFIG constants
+# Config constants
 my $GLOBAL_TITLE = 'title';
-my $GLOBAL_UPLOAD_CONFIGS = 'upload_configs';
-my $GLOBAL_UPLOAD_FILES = 'upload_files';
+my $GLOBAL_FOLDER_CONFIGS = 'folder_configs';
+my $GLOBAL_FOLDER_FILES = 'folder_files';
 my $GLOBAL_USER_CONFIGS = 'user_configs';
 my $GLOBAL_CGI_URL = 'cgi_url';
-my $GLOBAL_PATH = 'path'; # Path to search for validators
+my $GLOBAL_PATH = 'path'; # Path to search for checkers
 my $GLOBAL_POST_MAX = 'post_max';
 
-my $UPLOAD_NAME = "name";
-my $UPLOAD_TITLE = "title";
-my $UPLOAD_MESSAGE = "message";
-my $UPLOAD_DUE = "due";
-my $UPLOAD_FILE_COUNT = "file-count";
-my $UPLOAD_VALIDATORS = "validators";
-# TODO: file_name regex
+my $FOLDER_NAME = "name";
+my $FOLDER_TITLE = "title";
+my $FOLDER_TEXT = "text";
+my $FOLDER_DUE = "due";
+my $FOLDER_FILE_COUNT = "file_count";
+my $FOLDER_CHECKERS = "checkers";
 
 my $USER_NAME = 'user_name';
 my $USER_FULL_NAME = 'full_name';
 
+# Other constants
 my $DATE_FORMAT = "%O"; # TODO: Put in global config?
 
 memoize('read_config');
-memoize('dir_list');
 
-# TODO: Must be able to show student interface to admin
-# or make it clear what the student doesn't see
+################
+# Setup
+################
 
 my $q = CGI->new;
 
@@ -94,55 +98,72 @@ my $global_config = read_config($GLOBAL_CONFIG_FILE);
 $CGI::POST_MAX = $global_config->{$GLOBAL_POST_MAX};
 ($ENV{PATH}) = $global_config->{$GLOBAL_PATH} =~ /^(.*)$/; #TODO: insecure
 
-my ($upload_files) =
-    $global_config->{$GLOBAL_UPLOAD_FILES} =~ /^([A-Za-z0-9_ ]+)$/;
+################
+# Inputs
+################
 
-################
-# Read inputs
-################
-my ($remote_user) = ($q->remote_user() or "") =~ /^([A-Za-z0-9]+)$/;
+# Directories
+my ($user_configs, $folder_configs, $folder_files) =
+    map { $global_config->{$_} =~ /^([A-Za-z0-9_ ]+)$/ }
+        ($GLOBAL_USER_CONFIGS, $GLOBAL_FOLDER_CONFIGS, $GLOBAL_FOLDER_FILES);
+
+# Single folder and user
+my ($remote_user, $user, $folder) =
+    map { ($_ or "") =~ /^([A-Za-z0-9]+)$/ }
+        ($q->remote_user(), $q->param($USER), $q->param($FOLDER));
 my $is_admin = 1; # TODO
-
-my ($upload) = ($q->param($UPLOAD) or "") =~ /^([A-Za-z0-9]+)$/;
-my $upload_config = $upload && upload_config($upload);
-
-my ($user) = ($q->param($USER) or "") =~ /^([A-Za-z0-9]+)$/;
 $user = $remote_user if not $is_admin;
-my $user_config = $user && user_config($user);
 
-my $date = UnixDate($q->param($DATE), $DATE_FORMAT);
-my $start_date = UnixDate($q->param($START_DATE), $DATE_FORMAT);
-my $end_date = UnixDate($q->param($END_DATE), $DATE_FORMAT);
+my $folder_config = $folder && read_config($folder_configs, $folder);
+my $user_config = $user && read_config($user_configs, $user);
 
-# uploads and users
-my @uploads = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($UPLOADS);
-my @all_uploads = dir_list($global_config->{$GLOBAL_UPLOAD_CONFIGS});
+my ($download_file) = ($q->param($DOWNLOAD_FILE) or "") =~ /^([A-Za-z0-9\.]+)$/;
+
+# List of folders and users
+my @folders = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($FOLDERS);
 my @users = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($USERS);
+
+my @all_folders = dir_list($global_config->{$GLOBAL_FOLDER_CONFIGS});
 my @all_users = dir_list($global_config->{$GLOBAL_USER_CONFIGS});
 @all_users = intersect(\@all_users, [$remote_user]) unless $is_admin;
 
-# only most recent
+# Dates
+my ($date, $start_date, $end_date) =
+    map { UnixDate($q->param($_), $DATE_FORMAT) }
+        ($DATE, $START_DATE, $END_DATE);
+
+# Flags
 my $only_most_recent = $q->param($ONLY_MOST_RECENT) ? 1 : 0;
 
-# action
-# list dates
-# upload file
+# Other inputs
+#  param: $ACTION_*
+#  upload: $UPLOAD_FILE
+#  dir_list: list_dates list_files
+#  config:
+#   Printing only:
+#    GLOBAL_TITLE GLOBAL_CGI_URL
+#    FOLDER_NAME FOLDER_TITLE FOLDER_TEXT
+#    USER_FULL_NAME
+#   Processed:
+#    FOLDER_CHECKERS (check_folder as a system command)
+#    FOLDER_DUE (folder_results to flag code)
+#    FOLDER_FILE_COUNT (folder_results as a loop bound)
 
 ################
 # Do work
 ################
-if ($q->param($ACTION_DOWNLOAD)) {
+if ($q->param($ACTION_DOWNLOAD_FILE)) {
     download();
 } else {
     #print $q->header(); # TODO: enable when not debugging
     print $q->start_html(-title=>$global_config->{$GLOBAL_TITLE}), "\n";
 
     print $q->h1($global_config->{$GLOBAL_TITLE}), "\n";
-    if ($q->param($ACTION_UPLOAD)) { upload(); }
-    if ($q->param($ACTION_VALIDATE)) { validate(); }
+    if ($q->param($ACTION_UPLOAD_FILES)) { upload(); }
+    if ($q->param($ACTION_CHECK_FOLDER)) { check_folder(); }
     search_form();
-    if ($q->param($ACTION_SEARCH_UPLOADS)) { upload_results(); }
-    if ($q->param($ACTION_SEARCH)) { search_results(); }
+    if ($q->param($ACTION_FIND_FOLDERS)) { folder_results(); }
+    if ($q->param($ACTION_FIND_FILES)) { search_results(); }
 
     print $q->end_html(), "\n";
 }
@@ -152,14 +173,17 @@ if ($q->param($ACTION_DOWNLOAD)) {
 ################################
 
 sub download {
-    # print $q->header(); # TODO: not html
-    # copy($file, STDOUT);
+    my $filename =
+        join('/', $DIR, $folder_files, $folder, $user, $date, $download_file);
+    print $q->header(-type=>"application/octet-stream",
+                     -attachment=>$download_file,
+                     -Content_length=>-s $filename);
+    copy($filename, *STDOUT) or die; # TODO: error message
 }
 
 sub upload {
-    my $target_dir = join('/', $upload_files,
-                          $upload_config->{$UPLOAD_NAME},
-                          $user, UnixDate("now", $DATE_FORMAT));
+    my $target_dir = join('/', $DIR, $folder_files, $folder, $user,
+                          UnixDate("now", $DATE_FORMAT));
     make_path($target_dir); # TODO: file mode?
 
     if (not -d $target_dir) {
@@ -168,22 +192,25 @@ sub upload {
     } else {
         # TODO: what if file isn't uploaded? (it is skipped)
         # NOTE: upload multiple file w/ same name
-        foreach my $file ($q->upload($FILE)) {
+        foreach my $file ($q->upload($UPLOAD_FILE)) {
             my ($name) = $file =~ /([A-Za-z0-9\.]+)$/;
             # TODO print progress and success
             # TODO: use close upload and rename instead of copy
             print "Name: $name";
-#            print copy($file, "$target_dir/$name");
+#            print copy($file, "$target_dir/$name"); # TODO: copy errors
         }
     }
 }
 
-sub validate {
-    print $q->h2('Validation'), "\n";
-    # TODO: check that exists and have permissions
+sub check_folder {
+    my $folder = join('/',$DIR,$folder_files,$folder,$user,$date);
 
-    foreach my $validator (@{$upload_config->{$UPLOAD_VALIDATORS}}) {
-        system @$validator, join('/', $upload_files, $upload, $user, $date);
+    if (not -d $folder) { die; } # TODO
+
+    print $q->h2('Checking uploaded files'), "\n";
+
+    foreach my $checker (@{$folder_config->{$FOLDER_CHECKERS}}) {
+        system @$checker, $folder;
     }
 }
 
@@ -192,63 +219,48 @@ sub search_form {
 
     print start_form();
 
-    # TODO: unselect all
     print $q->start_table();
-    print $q->Tr($q->td(["User", "Assignment", "Date"]));
+    print $q->Tr($q->td(["User", "Folder", "Date"]));
     print $q->start_Tr({-valign=>'top'});
     print $q->td($q->scrolling_list(
-                     -name=>$USERS, -values=>\@all_users, -multiple=>1)), "\n";
-
-#    # TODO: admin controls on user-group
-#    my @groups = ("group1");
-#    print "user-group"; print $q->scrolling_list($GROUPS, \@groups);
-
+                     -name=>$USERS, -values=>\@all_users,
+                     -default=>\@all_users, -multiple=>1)), "\n";
     print $q->td($q->scrolling_list(
-        -name=>$UPLOAD,
-        -values=>\@all_uploads,
-        -multiple=>1)), "\n"; # TODO: (select some or none)
-
+                     -name=>$FOLDERS, -values=>\@all_folders,
+                     -default=>\@all_folders, -multiple=>1)), "\n";
     print $q->td(
         "Start", $q->input({-class => 'date', -name=>$START_DATE}), $q->br,
         "End", $q->input({-class => 'date', -name=>$END_DATE}), $q->br,
-        $q->checkbox(-name=>$ONLY_MOST_RECENT,
-                     -label=>'Only most recent'));
-# TODO: most recent != last
-
+        $q->checkbox(-name=>$ONLY_MOST_RECENT, -label=>'Only most recent'));
     print $q->end_Tr();
     print $q->end_table();
 
-    print $q->submit($ACTION_SEARCH, "Search"), "\n";
-    print $q->submit($ACTION_SEARCH_UPLOADS, "Search Uploads"), "\n";
+    print $q->submit($ACTION_FIND_FILES, "Find uploaded files"), "\n";
+    print $q->submit($ACTION_FIND_FOLDERS, "Find folders for uploading"), "\n";
     print $q->end_form();
-
-#    window.addEvent('load', function() {
-#        new DatePicker('.demo_vista', { pickerClass: 'datepicker_vista' });
-
 }
 
-sub upload_results {
-    # TODO: sort and filter by due date
-    print $q->h2("Uploads"), "\n";
+sub folder_results {
+    print $q->h2("Folders for Uploading"), "\n";
     print $q->start_table({-border=>2}), "\n";
-    foreach my $upload (list_uploads()) {
-        print $q->h3($upload_config->{$UPLOAD_NAME} . ":",
-                     $upload_config->{$UPLOAD_TITLE},
-                     " (due $upload_config->{$UPLOAD_DUE})"), "\n";
-        print $q->p($upload_config->{$UPLOAD_MESSAGE}), "\n";
+    foreach my $folder (list_folders()) {
+        my $folder_config = read_config($folder_configs, $folder);
+        print $q->h3($folder_config->{$FOLDER_NAME} . ":",
+                     $folder_config->{$FOLDER_TITLE},
+                     " (due $folder_config->{$FOLDER_DUE})"), "\n";
+        print $q->p($folder_config->{$FOLDER_TEXT}), "\n";
 
         print start_form();
-        print $q->hidden(
-            -name=>$UPLOAD, -value=>$upload_config->{$UPLOAD_NAME}), "\n";
-        # TODO: check about stiky
-        for (my $i = 0; $i < $upload_config->{$UPLOAD_FILE_COUNT}; $i++) {
-            print $q->p("File", $i+1 . ":", $q->filefield(-name=>$FILE)), "\n";
+        print $q->hidden(-name=>$FOLDER, -value=>$folder_config->{$FOLDER_NAME},
+                         -override=>1), "\n";
+        for (my $i = 0; $i < $folder_config->{$FOLDER_FILE_COUNT}; $i++) {
+            print $q->p("File", $i+1 . ":",
+                        $q->filefield(-name=>$UPLOAD_FILE, -override=>1)), "\n";
         }
-        print $q->p(
-            $q->checkbox(-name=>$ACTION_VALIDATE,
-                         -checked=>1, # TODO: why isn't checked working?
-                         -label=>"Validate")), "\n";
-        print $q->submit($ACTION_UPLOAD, "Upload files"), "\n";
+        print $q->p($q->checkbox(-name=>$ACTION_CHECK_FOLDER,
+                                 -checked=>1, -override=>1,
+                                 -label=>"Check after upload")), "\n";
+        print $q->submit($ACTION_UPLOAD_FILES, "Upload files"), "\n";
         print $q->end_form(), "\n";
     }
     print $q->end_table(), "\n";
@@ -256,39 +268,40 @@ sub upload_results {
 
 sub search_results {
     my %rows;
-    foreach my $upload (list_uploads()) {
-        my $upload_config = upload_config($upload);
-        foreach my $user (list_users($upload)) {
-            my $user_config = user_config($user);
-            foreach my $date (list_dates($upload, $user)) {
-                my $key = "$upload\0$user\0$date";
+    foreach my $folder (list_folders()) {
+        my $folder_config = read_config($folder_configs, $folder);
+        foreach my $user (list_users($folder)) {
+            my $user_config = read_config($user_configs, $user);
+            foreach my $date (list_dates($folder, $user)) {
+                my $key = join "\0", $folder, $user, $date;
 
                 $rows{$key} = $q->start_Tr() . "\n";
                 $rows{$key} .=
-                    $q->td([$upload, $upload_config->{$UPLOAD_TITLE},
+                    $q->td([$folder, $folder_config->{$FOLDER_TITLE},
                             $user, $user_config->{$USER_FULL_NAME},
-                            $date . " " .
+                            $date,
                             $q->a({-href=>form_url(
-                                        $ACTION_VALIDATE, $ACTION_VALIDATE,
-                                        $UPLOAD, $upload, $USER, $user,
+                                        $ACTION_CHECK_FOLDER, 1,
+                                        $FOLDER, $folder, $USER, $user,
                                         $DATE, $date)}, "[check]")]) . "\n";
 
                 my $first = 1;
-                foreach my $file (sort (list_files($upload, $user, $date))) {
+                foreach my $file (sort (list_files($folder, $user, $date))) {
                     unless ($first) {
                         $rows{$key} .= $q->end_Tr() . $q->start_Tr();
-                        $rows{$key} .= $q->td({colspan=>5});
+                        $rows{$key} .= $q->td({colspan=>6});
                     }
                     $first = 0;
 
                     my $filename = join '/',
-                        $DIR, $upload_files, $upload, $user, $date, $file;
+                        $DIR, $folder_files, $folder, $user, $date, $file;
 
                     $rows{$key} .= $q->td(
-                        $q->a({-href=>form_url($ACTION_DOWNLOAD, 1,
-                                               $UPLOAD, $upload,
+                        $q->a({-href=>form_url($ACTION_DOWNLOAD_FILE, 1,
+                                               $FOLDER, $folder,
                                                $USER, $user,
-                                               $DATE, $date)},
+                                               $DATE, $date,
+                                               $DOWNLOAD_FILE, $file)},
                               $file));
                     $rows{$key} .= $q->td({-align=>'right'}, -s $filename);
                 }
@@ -296,27 +309,25 @@ sub search_results {
             }
         }
     }
-    # TODO: is overdue
-    # TODO: zebra stripes
 
-    print $q->h2("Results"), "\n";
+    print $q->h2("Uploaded Files"), "\n";
     print $q->start_table({-border=>2}), "\n";
-    print $q->thead($q->Tr($q->th(["Upload", "Title", "User", "Name",
-                                   "Date", "File", "Size (bytes)"]))), "\n";
+    print $q->thead($q->Tr($q->th(["Folder", "Title", "User", "Name",
+                                   "Date", "Check", "File", "Size (bytes)"]))), "\n";
     foreach my $key (sort keys %rows) { print $rows{$key}, "\n"; }
     print $q->end_table(), "\n";
 }
 
 ################
-# Listing Functions
+# Listings
 ################
 
-sub list_uploads { return intersect(\@uploads, \@all_uploads); }
+sub list_folders { return intersect(\@folders, \@all_folders); }
 sub list_users { return intersect(\@users, \@all_users); }
 sub list_dates {
-    my ($upload, $user) = @_;
+    my ($folder, $user) = @_;
 
-    my @dates = dir_list($upload_files, $upload, $user);
+    my @dates = dir_list($folder_files, $folder, $user);
 
     @dates = grep {$start_date le $_} @dates if $start_date;
     @dates = grep {$end_date ge $_} @dates if $end_date;
@@ -329,28 +340,15 @@ sub list_dates {
 }
 
 sub list_files {
-    my ($upload, $user, $date) = @_;
-    return dir_list($upload_files, $upload, $user, $date);
-}
-
-################
-# Config Files
-################
-
-sub user_config { read_config($global_config->{$GLOBAL_USER_CONFIGS}, @_); }
-sub upload_config { read_config($global_config->{$GLOBAL_UPLOAD_CONFIGS}, @_); }
-sub read_config {
-    my $filename = join '/', $DIR, @_;
-    local $/;
-    open(my $fh, '<', $filename) or print "No file $filename\n"; # TODO
-    return decode_json(<$fh>);
+    my ($folder, $user, $date) = @_;
+    return dir_list($folder_files, $folder, $user, $date);
 }
 
 ################
 # CGI Utility
 ################
 
-# Expects: {$key1 => $val1, $key2 => $val2}
+# Expects: ($key1 => $val1, $key2 => $val2)
 # Returns: $cgi_url?$key1&$val1&$key2&val2
 sub form_url {
     my (%params) = @_;
@@ -367,6 +365,14 @@ sub start_form {
 ################
 # General Util
 ################
+
+sub read_config {
+    my $filename = join '/', $DIR, @_;
+    local $/;
+    open(my $fh, '<', $filename) or print "No file $filename\n"; # TODO
+    return decode_json(<$fh>);
+}
+
 sub intersect {
     my ($a, $b) = @_;
     my %a = map {($_,1)} @$a;
