@@ -37,6 +37,7 @@ use Date::Manip;
 # TODO: upload and move errors
 # TODO: error on checking non-existant folder
 # TODO: CSS classes
+# TODO: browse on left
 
 # NOTE: uploading multiple file w/ same name clobbers older files
 
@@ -165,12 +166,20 @@ if ($q->param($ACTION_DOWNLOAD_FILE)) {
 } else {
     print $q->header();
     print $q->start_html(-title=>$global_config->{$GLOBAL_TITLE}), "\n";
-    print $q->h1($global_config->{$GLOBAL_TITLE}), "\n";
+#    print $q->h1($global_config->{$GLOBAL_TITLE}), "\n";
+    print $q->start_div({-style=>"float:left"});
+    browse_folders();
+    print $q->end_div();
+#position:absolute;
+#
+    print $q->start_div({-style=>"float:right"});
+    search_form();
+    print $q->hr();
     if ($q->param($ACTION_UPLOAD_FILES)) { upload(); }
     if ($q->param($ACTION_CHECK_FOLDER)) { check_folder(); }
-    search_form();
-    if ($q->param($ACTION_FIND_FOLDERS)) { folder_results(); }
     if ($q->param($ACTION_FIND_FILES)) { search_results(); }
+    if ($q->param($ACTION_FIND_FOLDERS)) { folder_results(); }
+    print $q->end_div();
     print $q->end_html(), "\n";
 }
 
@@ -186,6 +195,24 @@ sub download {
                      -Content_length=>-s $filename);
     copy($filename, *STDOUT) or die; # TODO: error message
 }
+
+sub browse_folders {
+    print $q->h2("Browse"), "\n";
+    print $q->start_ul(), "\n";
+    foreach my $folder (list_folders()) {
+        my $folder_config = read_config($folder_configs, $folder);
+        print $q->li($q->a({-href=>form_url(
+                                 $USERS, $user,
+                                 $FOLDERS, $folder,
+                                 $ACTION_FIND_FILES, 1,
+                                 $ACTION_FIND_FOLDERS, 1)},
+                         $folder_config->{$FOLDER_NAME} . ":",
+                         $folder_config->{$FOLDER_TITLE},
+                         " (due $folder_config->{$FOLDER_DUE})")), "\n";
+    }
+    print $q->end_ul(), "\n";
+}
+
 
 sub upload {
     my $target_dir = join('/', $DIR, $folder_files, $folder, $user,
@@ -218,28 +245,28 @@ sub check_folder {
 }
 
 sub search_form {
-    print $q->h2('Search'), "\n";
+#    print $q->h2('Search'), "\n";
 
     print start_form();
-
-    print $q->start_table();
-    print $q->Tr($q->td(["User", "Folder", "Date"]));
-    print $q->start_Tr({-valign=>'top'});
-    print $q->td($q->scrolling_list(
+    print $q->start_div();
+#    print $q->start_table();
+#    print $q->Tr($q->td(["User", "Folder", "Date"]));
+#    print $q->start_Tr({-valign=>'top'});
+    print "User: ", $q->scrolling_list(
                      -name=>$USERS, -values=>\@all_users,
-                     -default=>\@all_users, -multiple=>1)), "\n";
-    print $q->td($q->scrolling_list(
+                     -default=>\@all_users, -multiple=>1, -size=>3), "\n";
+    print "Folder: ", $q->scrolling_list(
                      -name=>$FOLDERS, -values=>\@all_folders,
-                     -default=>\@all_folders, -multiple=>1)), "\n";
-    print $q->td(
-        "Start", $q->input({-class => 'date', -name=>$START_DATE}), $q->br,
-        "End", $q->input({-class => 'date', -name=>$END_DATE}), $q->br,
-        $q->checkbox(-name=>$ONLY_MOST_RECENT, -label=>'Only most recent'));
-    print $q->end_Tr();
-    print $q->end_table();
+                     -default=>\@all_folders, -multiple=>1, -size=>3), "\n";
+    print "Start", $q->textfield(-name=>$START_DATE, -size=>10), "\n";
+    print "End", $q->textfield(-name=>$END_DATE, -size=>10), "\n";
+    print $q->checkbox(-name=>$ONLY_MOST_RECENT, -label=>'Only most recent'), "\n";
+#    print $q->end_Tr();
+#    print $q->end_table();
 
-    print $q->submit($ACTION_FIND_FILES, "Find uploaded files"), "\n";
-    print $q->submit($ACTION_FIND_FOLDERS, "Find folders for uploading"), "\n";
+    print $q->submit($ACTION_FIND_FILES, "Search"), "\n";
+#    print $q->submit($ACTION_FIND_FOLDERS, "Find folders for uploading"), "\n";
+    print $q->end_div();
     print $q->end_form();
 }
 
