@@ -21,9 +21,9 @@ use Date::Manip;
 #  - groups
 
 # TODO: sort by (e.g. full name)
-# TODO: print "all checkers passed"
+# TODO: print "all checks passed"
 # TODO: file_name regex
-# TODO: assert $config->{$USER_NAME} == $user_name (and other configs)
+# TODO: assert $config->{$FOLER_NAME} == $folder_name
 # TODO: check configs are valid
 # TODO: Must be able to show student interface to admin
 #       or make it clear what the student doesn't see
@@ -33,7 +33,12 @@ use Date::Manip;
 #        new DatePicker('.demo_vista', { pickerClass: 'datepicker_vista' });
 # TODO: is overdue
 # TODO: zebra stripes
-# TODO: Admin
+# TODO: Upload chmod?
+# TODO: upload and move errors
+# TODO: error on checking non-existant folder
+# TODO: CSS classes
+
+# NOTE: uploading multiple file w/ same name clobbers older files
 
 # File Paths
 #my $DIR="/u-/adamsmd/projects/upload/tmp";
@@ -54,6 +59,8 @@ my $START_DATE="start_date";
 my $END_DATE="end_date";
 my $ONLY_MOST_RECENT="only_most_recent";
 
+my $HEADER_OCTET_STREAM='application/octet-stream';
+
 # Upload/download constants
 my $FOLDER="folder";
 my $USER="user";
@@ -65,10 +72,11 @@ my $DATE="date";
 my $GLOBAL_TITLE = 'title';
 my $GLOBAL_FOLDER_CONFIGS = 'folder_configs';
 my $GLOBAL_FOLDER_FILES = 'folder_files';
-my $GLOBAL_USER_CONFIGS = 'user_configs';
 my $GLOBAL_CGI_URL = 'cgi_url';
 my $GLOBAL_PATH = 'path'; # Path to search for checkers
 my $GLOBAL_POST_MAX = 'post_max';
+my $GLOBAL_ADMINS = 'admins';
+my $GLOBAL_USERS = 'users';
 
 my $FOLDER_NAME = "name";
 my $FOLDER_TITLE = "title";
@@ -96,26 +104,26 @@ if ($error) { error($error); }
 
 my $global_config = read_config($GLOBAL_CONFIG_FILE);
 $CGI::POST_MAX = $global_config->{$GLOBAL_POST_MAX};
-($ENV{PATH}) = $global_config->{$GLOBAL_PATH} =~ /^(.*)$/; #TODO: insecure
+($ENV{PATH}) = $global_config->{$GLOBAL_PATH} =~ /^(.*)$/;
 
 ################
 # Inputs
 ################
 
 # Directories
-my ($user_configs, $folder_configs, $folder_files) =
+my ($folder_configs, $folder_files) =
     map { $global_config->{$_} =~ /^([A-Za-z0-9_ ]+)$/ }
-        ($GLOBAL_USER_CONFIGS, $GLOBAL_FOLDER_CONFIGS, $GLOBAL_FOLDER_FILES);
+        ($GLOBAL_FOLDER_CONFIGS, $GLOBAL_FOLDER_FILES);
 
 # Single folder and user
 my ($remote_user, $user, $folder) =
     map { ($_ or "") =~ /^([A-Za-z0-9]+)$/ }
         ($q->remote_user(), $q->param($USER), $q->param($FOLDER));
-my $is_admin = 1; # TODO
+my $is_admin = grep { $_ eq $remote_user } @{$global_config->{$GLOBAL_ADMINS}};
 $user = $remote_user if not $is_admin;
+my $user_config = $user && $global_config->{$GLOBAL_USERS}{$user};
 
 my $folder_config = $folder && read_config($folder_configs, $folder);
-my $user_config = $user && read_config($user_configs, $user);
 
 my ($download_file) = ($q->param($DOWNLOAD_FILE) or "") =~ /^([A-Za-z0-9\.]+)$/;
 
@@ -124,13 +132,12 @@ my @folders = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($FOLDERS);
 my @users = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($USERS);
 
 my @all_folders = dir_list($global_config->{$GLOBAL_FOLDER_CONFIGS});
-my @all_users = dir_list($global_config->{$GLOBAL_USER_CONFIGS});
+my @all_users = keys %{$global_config->{$GLOBAL_USERS}};
 @all_users = intersect(\@all_users, [$remote_user]) unless $is_admin;
 
 # Dates
 my ($date, $start_date, $end_date) =
-    map { UnixDate($q->param($_), $DATE_FORMAT) }
-        ($DATE, $START_DATE, $END_DATE);
+    map {UnixDate($q->param($_), $DATE_FORMAT)} ($DATE, $START_DATE, $END_DATE);
 
 # Flags
 my $only_most_recent = $q->param($ONLY_MOST_RECENT) ? 1 : 0;
@@ -145,6 +152,7 @@ my $only_most_recent = $q->param($ONLY_MOST_RECENT) ? 1 : 0;
 #    FOLDER_NAME FOLDER_TITLE FOLDER_TEXT
 #    USER_FULL_NAME
 #   Processed:
+#    GLOBAL_USERS (@all_users)
 #    FOLDER_CHECKERS (check_folder as a system command)
 #    FOLDER_DUE (folder_results to flag code)
 #    FOLDER_FILE_COUNT (folder_results as a loop bound)
@@ -155,16 +163,14 @@ my $only_most_recent = $q->param($ONLY_MOST_RECENT) ? 1 : 0;
 if ($q->param($ACTION_DOWNLOAD_FILE)) {
     download();
 } else {
-    #print $q->header(); # TODO: enable when not debugging
+    print $q->header();
     print $q->start_html(-title=>$global_config->{$GLOBAL_TITLE}), "\n";
-
     print $q->h1($global_config->{$GLOBAL_TITLE}), "\n";
     if ($q->param($ACTION_UPLOAD_FILES)) { upload(); }
     if ($q->param($ACTION_CHECK_FOLDER)) { check_folder(); }
     search_form();
     if ($q->param($ACTION_FIND_FOLDERS)) { folder_results(); }
     if ($q->param($ACTION_FIND_FILES)) { search_results(); }
-
     print $q->end_html(), "\n";
 }
 
@@ -175,7 +181,7 @@ if ($q->param($ACTION_DOWNLOAD_FILE)) {
 sub download {
     my $filename =
         join('/', $DIR, $folder_files, $folder, $user, $date, $download_file);
-    print $q->header(-type=>"application/octet-stream",
+    print $q->header(-type=>$HEADER_OCTET_STREAM,
                      -attachment=>$download_file,
                      -Content_length=>-s $filename);
     copy($filename, *STDOUT) or die; # TODO: error message
@@ -184,20 +190,17 @@ sub download {
 sub upload {
     my $target_dir = join('/', $DIR, $folder_files, $folder, $user,
                           UnixDate("now", $DATE_FORMAT));
-    make_path($target_dir); # TODO: file mode?
+    make_path($target_dir);
 
     if (not -d $target_dir) {
         sleep 1;
         print "ERROR: upload failed, please retry";
     } else {
-        # TODO: what if file isn't uploaded? (it is skipped)
-        # NOTE: upload multiple file w/ same name
         foreach my $file ($q->upload($UPLOAD_FILE)) {
-            my ($name) = $file =~ /([A-Za-z0-9\.]+)$/;
-            # TODO print progress and success
-            # TODO: use close upload and rename instead of copy
-            print "Name: $name";
-#            print copy($file, "$target_dir/$name"); # TODO: copy errors
+            die if not $file;
+            my ($name) = $file =~ /([A-Za-z0-9\. ]+)$/;
+            print "Uploading: $name";
+            move($q->tmpFileName($name), "$target_dir/$name");
         }
     }
 }
@@ -205,7 +208,7 @@ sub upload {
 sub check_folder {
     my $folder = join('/',$DIR,$folder_files,$folder,$user,$date);
 
-    if (not -d $folder) { die; } # TODO
+    if (not -d $folder) { die; }
 
     print $q->h2('Checking uploaded files'), "\n";
 
@@ -271,7 +274,7 @@ sub search_results {
     foreach my $folder (list_folders()) {
         my $folder_config = read_config($folder_configs, $folder);
         foreach my $user (list_users($folder)) {
-            my $user_config = read_config($user_configs, $user);
+            my $user_config = $global_config->{$GLOBAL_USERS}{$user};
             foreach my $date (list_dates($folder, $user)) {
                 my $key = join "\0", $folder, $user, $date;
 
@@ -312,8 +315,9 @@ sub search_results {
 
     print $q->h2("Uploaded Files"), "\n";
     print $q->start_table({-border=>2}), "\n";
-    print $q->thead($q->Tr($q->th(["Folder", "Title", "User", "Name",
-                                   "Date", "Check", "File", "Size (bytes)"]))), "\n";
+    print $q->thead(
+        $q->Tr($q->th(["Folder", "Title", "User", "Name",
+                       "Date", "Check", "File", "Size (bytes)"]))), "\n";
     foreach my $key (sort keys %rows) { print $rows{$key}, "\n"; }
     print $q->end_table(), "\n";
 }
@@ -326,16 +330,10 @@ sub list_folders { return intersect(\@folders, \@all_folders); }
 sub list_users { return intersect(\@users, \@all_users); }
 sub list_dates {
     my ($folder, $user) = @_;
-
     my @dates = dir_list($folder_files, $folder, $user);
-
     @dates = grep {$start_date le $_} @dates if $start_date;
     @dates = grep {$end_date ge $_} @dates if $end_date;
-
-    if ($#dates != -1 and $only_most_recent) {
-        @dates = ($dates[$#dates]);
-    }
-    
+    @dates = ($dates[$#dates]) if $#dates != -1 and $only_most_recent;    
     return @dates;
 }
 
@@ -393,13 +391,9 @@ sub dir_list {
     my $dir = join '/', $DIR, @_;
 
     my $d = DirHandle->new($dir);
-    if ($d) {
-        my @ds = $d->read;
-        $d->close;
-        @ds = grep {!/^\./} @ds; # skip dot files
-        @ds = grep {!/~$/} @ds; # skip backup files
-        return sort @ds;
-    } else {
-        return ();
-    }
+    my @ds = $d ? $d->read : ();
+    $d->close if $d;
+    @ds = grep {!/^\./} @ds; # skip dot files
+    @ds = grep {!/~$/} @ds; # skip backup files
+    return sort @ds;
 }
