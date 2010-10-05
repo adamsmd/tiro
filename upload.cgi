@@ -49,12 +49,10 @@ my $GLOBAL_CONFIG_FILE="global_config.json";
 # CGI Constants
 my $ACTION_DOWNLOAD_FILE="download_file";
 my $ACTION_UPLOAD_FILES="upload_files";
-my $ACTION_FIND_FILES="find_files";
-my $ACTION_FIND_FOLDERS="find_folders";
 my $ACTION_CHECK_FOLDER="check_folder";
 
 my $USERS="users";
-my $GROUPS="groups";
+#my $GROUPS="groups";
 my $FOLDERS="folders";
 my $START_DATE="start_date";
 my $END_DATE="end_date";
@@ -63,11 +61,12 @@ my $ONLY_MOST_RECENT="only_most_recent";
 my $HEADER_OCTET_STREAM='application/octet-stream';
 
 # Upload/download constants
-my $FOLDER="folder";
-my $USER="user";
-my $UPLOAD_FILE="upload_file";
-my $DOWNLOAD_FILE="download_file";
-my $DATE="date";
+my $FILE='file';
+
+my $SORTING = 'sorting';
+my $SORTING_FOLDER = 'sorting_folder';
+my $SORTING_USER = 'sorting_user';
+my $SORTING_DATE = 'sorting_date';
 
 # Config constants
 my $GLOBAL_TITLE = 'title';
@@ -92,11 +91,6 @@ my $USER_FULL_NAME = 'full_name';
 # Other constants
 my $DATE_FORMAT = "%O"; # TODO: Put in global config?
 
-my $SORTING = 'sorting';
-my $SORTING_FOLDER = 'sorting_folder';
-my $SORTING_USER = 'sorting_user';
-my $SORTING_DATE = 'sorting_date';
-
 memoize('read_config');
 
 ################
@@ -120,36 +114,30 @@ $CGI::POST_MAX = $global_config->{$GLOBAL_POST_MAX};
 my ($folder_configs) = $global_config->{$GLOBAL_FOLDER_CONFIGS} =~ /^([A-Za-z0-9_ ]+)$/;
 my ($folder_files) = $global_config->{$GLOBAL_FOLDER_FILES} =~ /^([A-Za-z0-9_ ]+)$/;
 
-# Single folder and user
+# User
 my ($remote_user) = ($q->remote_user() or "") =~ /^([A-Za-z0-9_ ]+)$/;
-my ($user) = ($q->param($USER) or "") =~ /^([A-Za-z0-9_ ]+)$/;
-my ($folder) = ($q->param($FOLDER) or "") =~ /^([A-Za-z0-9_ ]+)$/;
 $remote_user="user1";
-$user="user1"; # TODO: this is hard
 my $is_admin = grep { $_ eq $remote_user } @{$global_config->{$GLOBAL_ADMINS}};
-$user = $remote_user if not $is_admin;
-my $user_config = $user && $global_config->{$GLOBAL_USERS}{$user};
-
-my $folder_config = $folder && read_config($folder_configs, $folder);
-
-my ($download_file) = ($q->param($DOWNLOAD_FILE) or "") =~ /^([A-Za-z0-9\.]+)$/;
-
-# List of folders and users
-my @folders = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($FOLDERS);
-my @users = grep {length} map {(/^([A-Za-z0-9]+)$/)[0]} $q->param($USERS);
-
-my @all_folders = dir_list($global_config->{$GLOBAL_FOLDER_CONFIGS});
 my @all_users = sort keys %{$global_config->{$GLOBAL_USERS}};
-@all_users = sort intersect(\@all_users, [$remote_user]) unless $is_admin;
+@all_users = sort (intersect(\@all_users, [$remote_user])) unless $is_admin;
+my @users = sort map { /^([A-Za-z0-9]+)$/ } $q->param($USERS);
+@users = sort (intersect(\@all_users, \@users));
+
+# Download file
+my ($file) = ($q->param($FILE) or "") =~ /^([A-Za-z0-9\.]+)$/;
+
+# Folders
+my @all_folders = dir_list($global_config->{$GLOBAL_FOLDER_CONFIGS});
+my @folders = map { /^([A-Za-z0-9]+)$/ } $q->param($FOLDERS);
+@folders = sort (intersect(\@all_folders, \@folders));
 
 # Dates
-my ($date) = UnixDate($q->param($DATE), $DATE_FORMAT);
-my ($start_date) = UnixDate($q->param($START_DATE), $DATE_FORMAT);
-my ($end_date) = UnixDate($q->param($END_DATE), $DATE_FORMAT);
+my ($start_date) = (UnixDate($q->param($START_DATE), $DATE_FORMAT) or "") =~ /^([A-Za-z0-9:-]+)$/;
+my ($end_date) = (UnixDate($q->param($END_DATE), $DATE_FORMAT) or "") =~ /^([A-Za-z0-9:-]+)$/;
 
 # Flags
 my $only_most_recent = $q->param($ONLY_MOST_RECENT) ? 1 : 0;
-my ($sorting) = ($q->param($SORTING) or "") =~ /^([A-Za-z0-9_]+)$/;
+my ($sorting) = ($q->param($SORTING) or "") =~ /^([A-Za-z0-9_]*)$/;
 
 # Other inputs
 #  param: $ACTION_*
@@ -185,9 +173,10 @@ if ($q->param($ACTION_DOWNLOAD_FILE)) {
     print $q->start_div({-style=>"float:right"});
     search_form();
     if ($q->param($ACTION_UPLOAD_FILES)) { print $q->hr(); upload(); }
-    if ($q->param($ACTION_CHECK_FOLDER)) { print $q->hr(); check_folder(); }
-    if ($q->param($ACTION_FIND_FILES)) { print $q->hr(); search_results(); }
-    if ($q->param($ACTION_FIND_FOLDERS)) { print $q->hr(); folder_results(); }
+    if ($q->param($ACTION_UPLOAD_FILES) or $q->param($ACTION_CHECK_FOLDER)) {
+        print $q->hr(); check_folder(); }
+    print $q->hr(); search_results();
+    print $q->hr(); folder_results();
     print $q->end_div();
 
     print $q->end_html(), "\n";
@@ -198,11 +187,13 @@ if ($q->param($ACTION_DOWNLOAD_FILE)) {
 ################################
 
 sub download {
+    my $folder = $folders[0] or die;
+    my $user = $users[0] or die;
     my $filename =
-        join('/', $DIR, $folder_files, $folder, $user, $date, $download_file);
-    print $q->header(#-type=>$HEADER_OCTET_STREAM,
-                     -attachment=>$download_file,
-                     -Content_length=>-s $filename);
+        join('/', $DIR, $folder_files, $folder, $user, $start_date, $file);
+    print $q->header(-type => $HEADER_OCTET_STREAM,
+                     -attachment => $file,
+                     -Content_length => -s $filename);
     copy($filename, *STDOUT) or die; # TODO: error message
 }
 
@@ -211,46 +202,53 @@ sub browse_folders {
     print $q->start_ul(), "\n";
     foreach my $folder (@all_folders) {
         my $folder_config = read_config($folder_configs, $folder);
-        print $q->li($q->a({-href=>form_url(
-                                 $FOLDERS, $folder,
-                                 $USERS, $user,
-                                 $ACTION_FIND_FILES, 1,
-                                 $ACTION_FIND_FOLDERS, 1)},
-                         $folder_config->{$FOLDER_NAME} . ":",
-                         $folder_config->{$FOLDER_TITLE},
-                         " (due $folder_config->{$FOLDER_DUE})")), "\n";
+        print $q->li($q->a({-href=>form_url($FOLDERS, $folder,
+                                            map { ($USERS, $_) } @all_users)},
+                           $folder . ":",
+                           $folder_config->{$FOLDER_TITLE},
+                           " (due $folder_config->{$FOLDER_DUE})")), "\n";
     }
     print $q->end_ul(), "\n";
 }
 
 
 sub upload {
-    my $target_dir = join('/', $DIR, $folder_files, $folder, $user,
-                          UnixDate("now", $DATE_FORMAT));
+    $start_date = $end_date = UnixDate("now", $DATE_FORMAT); # TODO: override global date
+    @users = ($remote_user); # TODO: override global users
+    my $folder = $folders[0] or die; # TODO
+    my $target_dir = join('/', $DIR, $folder_files, $folder, $remote_user, $start_date);
+
     mkpath($target_dir);
 
     if (not -d $target_dir) {
         sleep 1;
         print "ERROR: upload failed, please retry";
     } else {
-        foreach my $file ($q->upload($UPLOAD_FILE)) {
+        foreach my $file ($q->upload($FILE)) {
             die if not $file;
             my ($name) = $file =~ /([A-Za-z0-9\. ]+)$/;
-            print "Uploading: $name to ", $q->tmpFileName($name);
-            print copy($file, "$target_dir/$name");
+            print "Uploading: $name\n";
+            print copy($file, "$target_dir/$name"); # TODO
         }
     }
 }
 
 sub check_folder {
-    my $folder_path = join('/',$DIR,$folder_files,$folder,$user,$date);
+    foreach my $folder (@folders) {
+        foreach my $user (@users) {
+            foreach my $date (list_dates($folder, $user)) {
+                my $folder_config = $folder && read_config($folder_configs, $folder);
+                my $folder_path = join('/',$DIR, $folder_files, $folder, $user, $date);
 
-    if (not -d $folder_path) { die; }
+                if (not -d $folder_path) { die; }
 
-    print $q->h2("Checking $folder for $user on $date"), "\n";
-    foreach my $checker (@{$folder_config->{$FOLDER_CHECKERS}}) {
-        my @checker = map {$_ =~ /(.*)/} @$checker;
-        system @checker, $folder_path;
+                print $q->h2("Checking $folder for $user on $date"), "\n";
+                foreach my $checker (@{$folder_config->{$FOLDER_CHECKERS}}) {
+                    my @checker = map {$_ =~ /(.*)/} @$checker;
+                    system @checker, $folder_path;
+                }
+            }
+        }
     }
 }
 
@@ -271,9 +269,8 @@ sub search_form {
         -labels=>{$SORTING_FOLDER => "Folder",
                   $SORTING_USER => "User", 
                   $SORTING_DATE => "Date"}), "\n";
-    print $q->hidden(-name=>$ACTION_FIND_FOLDERS, -value=>1, -override=>1), "\n";
 
-    print $q->submit($ACTION_FIND_FILES, "Search"), "\n";
+    print $q->submit(-value=>"Search"), "\n";
     print $q->end_div();
     print $q->end_form();
 }
@@ -282,25 +279,21 @@ sub folder_results {
     print $q->start_table({-border=>2}), "\n";
     foreach my $folder (list_folders()) {
         my $folder_config = read_config($folder_configs, $folder);
-        print $q->h3($folder_config->{$FOLDER_NAME} . ":",
+        print $q->h3($folder . ":",
                      $folder_config->{$FOLDER_TITLE},
                      " (due $folder_config->{$FOLDER_DUE})"), "\n";
         print $q->p($folder_config->{$FOLDER_TEXT}), "\n";
 
         print start_form();
-        print $q->hidden(-name=>$FOLDER, -value=>$folder_config->{$FOLDER_NAME},
-                         -override=>1), "\n";
+        print $q->hidden(-name=>$FOLDERS, -value=>$folder, -override=>1), "\n";
         for (my $i = 0; $i < $folder_config->{$FOLDER_FILE_COUNT}; $i++) {
             print $q->p("File", $i+1 . ":",
-                        $q->filefield(-name=>$UPLOAD_FILE, -override=>1)), "\n";
+                        $q->filefield(-name=>$FILE, -override=>1)), "\n";
         }
         print $q->p($q->checkbox(-name=>$ACTION_CHECK_FOLDER,
                                  -checked=>1, -override=>1,
                                  -label=>"Check after upload")), "\n";
-        print $q->hidden(-name=>$ACTION_FIND_FOLDERS, -value=>1, -override=>1);
-        print $q->hidden(-name=>$ACTION_FIND_FILES, -value=>1, -override=>1);
-        print $q->hidden(-name=>$FOLDERS, -value=>$folder, -override=>1);
-        print $q->hidden(-name=>$USERS, -value=>$user, -override=>1);
+#        print $q->hidden(-name=>$FOLDERS, -value=>$folder, -override=>1);
         print $q->submit($ACTION_UPLOAD_FILES, "Upload files"), "\n";
         print $q->end_form(), "\n";
     }
@@ -314,9 +307,10 @@ sub search_results {
         foreach my $user (list_users($folder)) {
             my $user_config = $global_config->{$GLOBAL_USERS}{$user};
             foreach my $date (list_dates($folder, $user)) {
-                my $key = join "\0", ($sorting eq $SORTING_USER ? ($user, $folder, $date) :
-                                      $sorting eq $SORTING_DATE ? ($date, $folder, $user) :
-                                      ($folder, $user, $date));
+                my $key = join "\0", (
+                    $sorting eq $SORTING_USER ? ($user, $folder, $date) :
+                    $sorting eq $SORTING_DATE ? ($date, $folder, $user) :
+                    ($folder, $user, $date));
 
                 $rows{$key} = $q->start_Tr() . "\n";
                 $rows{$key} .=
@@ -325,11 +319,11 @@ sub search_results {
                             $date,
                             $q->a({-href=>form_url(
                                         $ACTION_CHECK_FOLDER, 1,
-                                        $ACTION_FIND_FILES, 1,
-                                        $ACTION_FIND_FOLDERS, 1,
-                                        $FOLDERS, $folder, $FOLDER, $folder,
-                                        $USER, $user, $USERS, $user,
-                                        $DATE, $date)}, "[check]")]) . "\n";
+                                        $FOLDERS, $folder,
+                                        $USERS, $user,
+#                                        $DATE, $date,
+                                        $START_DATE, $date,
+                                        $END_DATE, $date)}, "[check]")]) . "\n";
 
                 my $first = 1;
                 foreach my $file (sort (list_files($folder, $user, $date))) {
@@ -343,11 +337,13 @@ sub search_results {
                         $DIR, $folder_files, $folder, $user, $date, $file;
 
                     $rows{$key} .= $q->td(
-                        $q->a({-href=>form_url($ACTION_DOWNLOAD_FILE, 1,
-                                               $FOLDER, $folder,
-                                               $USER, $user,
-                                               $DATE, $date,
-                                               $DOWNLOAD_FILE, $file)},
+                        $q->a({-href=>form_url(
+                                    $ACTION_DOWNLOAD_FILE, 1,
+                                    $FOLDERS, $folder,
+                                    $USERS, $user,
+                                    $START_DATE, $date, 
+                                    $END_DATE, $date, #$DATE, $date,
+                                    $FILE, $file)},
                               $file));
                     $rows{$key} .= $q->td({-align=>'right'}, -s $filename);
                 }
@@ -369,11 +365,12 @@ sub search_results {
 # Listings
 ################
 
-sub list_folders { return intersect(\@folders, \@all_folders); }
-sub list_users { return intersect(\@users, \@all_users); }
+sub list_folders { return @folders; }
+sub list_users { return @users; }
 sub list_dates {
     my ($folder, $user) = @_;
     my @dates = dir_list($folder_files, $folder, $user);
+    @dates = map {/^([A-Za-z0-9-:]+)$/} @dates;
     @dates = grep {$start_date le $_} @dates if $start_date;
     @dates = grep {$end_date ge $_} @dates if $end_date;
     @dates = ($dates[$#dates]) if $#dates != -1 and $only_most_recent;    
@@ -389,12 +386,14 @@ sub list_files {
 # CGI Utility
 ################
 
-# Expects: ($key1 => $val1, $key2 => $val2)
+# Expects: ($key1, $val1, $key2, $val2)
 # Returns: $cgi_url?$key1&$val1&$key2&val2
 sub form_url {
-    my (%params) = @_;
-    return $global_config->{$GLOBAL_CGI_URL} . "?" .
-        join("&", map {$_ . "=" . $params{$_}} keys %params);
+    my $str = $global_config->{$GLOBAL_CGI_URL};
+    for (my $i = 0; $i <= $#_; $i+=2) {
+        $str .= ($i == 0 ? "?" : "&") . $_[$i] . "=" . $_[$i+1];
+    }
+    return $str;
 }
 
 sub start_form {
