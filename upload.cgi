@@ -216,9 +216,12 @@ sub upload {
     } else {
         foreach my $file ($q->upload(FILE)) {
             die if not $file; # TODO: error message
-            my ($name) = $file =~ /([A-Za-z0-9\. ]+)$/;
+            my ($name) = $file =~ /$file_re/;
             print "Uploading: $name\n";
             print copy($file, "$target_dir/$name"); # TODO die and error message
+#print $q->redirect(
+#        -uri=>'http://somewhere.else/in/movie/land',
+#         -status=>303);
         }
     }
 }
