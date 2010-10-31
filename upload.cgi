@@ -38,6 +38,10 @@ use Date::Manip;
 #  - Use path_info() to dispatch upload, download and pre-upload(?)
 #  - Full URL to cgi.cs.indiana.edu? url()
 
+# config file validator
+# HTML container for validator output
+
+
 # NOTE: uploading multiple file w/ same name clobbers older files
 
 # File Paths
