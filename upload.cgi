@@ -15,11 +15,6 @@ use Memoize; memoize('read_config');
 use JSON;
 use Date::Manip;
 
-# Done:
-#  - move search form to left column
-#  - Scroll list for search form to select "submitted" or "unsubmitted"
-#  - which students haven't submitted
-
 # Future features:
 #  - select subset of checkers to run
 #  - groups
@@ -31,23 +26,19 @@ use Date::Manip;
 #  - check configs are valid
 #  - highlight incomplete submissions
 #  - Admin interface (but be clear what it looks like to student)
-#  - hilight overdue
+#  - hilight "overdue" in red or bold
 #  - zebra stripes (one in three)
 #  - Upload chmod?
 #  - error handling
 #  - HTML formatting / CSS classes
 #  - Separate upload page (so full assignment can be listed)
-#  - Checkmark for submitted and meta data on browse, e.g.:
-#    - "n/m" submitted, "(past due)", etc.
 #  - Download tar-ball.
 #  - Use path_info() to dispatch upload, download and pre-upload(?)
 #  - Full URL to cgi.cs.indiana.edu? url()
 #  - When no folders specified use different text for result pane
 #  - Server error on upload with no file
-
-# config file validator
-# HTML container for validator output
-
+#  - config file validator
+#  - HTML container for validator output
 
 # NOTE: uploading multiple file w/ same name clobbers older files
 
@@ -112,10 +103,12 @@ my ($now) = (UnixDate("now", DATE_FORMAT) or "") =~ DATE_RE;
 
 # Flags
 my $only_most_recent = $q->param(ONLY_MOST_RECENT) ? 1 : 0;
-my $submitted_yes = (grep { $_ eq SUBMITTED_YES } $q->param(SUBMITTED)) ? 1 : 0;
-my $submitted_no = (grep { $_ eq SUBMITTED_NO } $q->param(SUBMITTED)) ? 1 : 0;
-my $due_past = (grep { $_ eq DUE_PAST } $q->param(DUE)) ? 1 : 0;
-my $due_future = (grep { $_ eq DUE_FUTURE } $q->param(DUE)) ? 1 : 0;
+my @submitted_tmp = ($q->param(SUBMITTED) or (SUBMITTED_YES, SUBMITTED_NO));
+my $submitted_yes = (grep { $_ eq SUBMITTED_YES } @submitted_tmp) ? 1 : 0;
+my $submitted_no = (grep { $_ eq SUBMITTED_NO } @submitted_tmp) ? 1 : 0;
+my @due_tmp = ($q->param(DUE) or (DUE_PAST, DUE_FUTURE));
+my $due_past = (grep { $_ eq DUE_PAST } @due_tmp) ? 1 : 0;
+my $due_future = (grep { $_ eq DUE_FUTURE } @due_tmp) ? 1 : 0;
 my ($sorting) = ($q->param(SORTING) or "") =~ /^([A-Za-z0-9_]*)$/;
 
 # Directories
@@ -128,7 +121,7 @@ $remote_user="user1";
 my $is_admin = grep { $_ eq $remote_user } @{$global_config->admins};
 my @all_users = sort keys %{$global_config->users};
 @all_users = sort (intersect(\@all_users, [$remote_user])) unless $is_admin;
-my @users = sort map { $_ =~ FILE_RE } $q->param(USERS);
+my @users = sort map { $_ =~ FILE_RE } ($q->param(USERS) or @all_users);
 @users = sort (intersect(\@all_users, \@users));
 
 # Download file
@@ -161,24 +154,27 @@ my @folders = map { $_ =~ FILE_RE } $q->param(FOLDERS);
 # Do work
 ################
 
+sub println { print @_, "\n"; }
+
 if ($q->param(ACTION_DOWNLOAD_FILE)) { download(); }
 elsif ($q->param(ACTION_UPLOAD_FILES)) { upload(); }
 else {
     print $q->header();
-    print $q->start_html(-title=>$global_config->title), "\n";
-    print $q->start_div();
-    print $q->start_div({-style=>'width:20em;float:left;'});
+    println $q->start_html(-title=>$global_config->title,
+                           -style=>{-verbatim=>'td { vertical-align:top; }'});
+    println $q->h1("C211 Homework Submission");
+    println $q->start_div();
+    println $q->start_div({-style=>'width:20em;float:left;'});
     browse_folders();
     search_form();
-    print $q->end_div();
-    print $q->start_div({-style=>'margin-left:20em'});
-    if ($q->param(ACTION_CHECK_FOLDER)) { check_folder(); print $q->hr(); }
-    search_results(); print $q->hr();
+    println $q->end_div();
+    println $q->start_div(); #{-style=>'margin-left:21em;'});
+    if ($q->param(ACTION_CHECK_FOLDER)) { check_folder(); println $q->hr(); }
+    search_results(); println $q->hr();
     folder_results();
-    print $q->end_div();
-    print $q->end_div();
-    print $q->end_span();
-    print $q->end_html(), "\n";
+    println $q->end_div();
+    println $q->end_div();
+    println $q->end_html();
 }
 exit 0;
 
@@ -214,57 +210,75 @@ sub upload {
 
 sub browse_folders {
     # Print
-    print $q->h3("Browse"), "\n";
-    print $q->start_ul(), "\n";
+    println $q->h3({-style=>'margin-top:0'}, "Browse"); # Stop spurious margin
+    println $q->start_table();
     foreach my $folder (list_folders(@all_folders)) {
-        print $q->li($q->a({-href=>form_url(FOLDERS, $folder->name,
-                                            map { (USERS, $_) } @all_users)},
-                           $folder->name . ":", $folder->title,
-                           " (due " . $folder->due . ")")), "\n";
+        println $q->Tr($q->td({colspan=>2},
+                              $q->a({-href=>form_url(FOLDERS, $folder->name)},
+                                    $folder->name . ":", $folder->title)));
+        my $submitted = grep { list_dates($folder->name, $_) } @all_users;
+        my $num_users = @all_users;
+        println row(
+            $q->small("&nbsp;&nbsp;Due " . $folder->due),
+            $q->small($submitted ?
+                      (" - Submitted" .
+                       ($#all_users == 0 ? "" : " ($submitted/$num_users)")) :
+                      ($now ge $folder->due ? " - Overdue" : "")));
     }
-    print $q->end_ul(), "\n";
+    println $q->end_table();
 }
 
 sub search_form {
     # Print
-    print $q->h3("Search"), "\n";
-    print $q->start_form(-action=>$global_config->cgi_url);
-    print $q->start_table();
-    print $q->start_Tr(), "\n";
-    print $q->Tr($q->td(["User:", $q->scrolling_list(
-                      -name=>USERS, -values=>\@all_users,
-                      -default=>\@all_users, -multiple=>1, -size=>3)])), "\n";
-    print $q->Tr($q->td(["Folder:", $q->scrolling_list(
-                     -name=>FOLDERS, -values=>\@all_folders,
-                     -default=>\@all_folders, -multiple=>1, -size=>3)])), "\n";
-    print $q->Tr($q->td(["Date start: ", $q->textfield(-name=>START_DATE, -size=>10)])), "\n";
-    print $q->Tr($q->td(["Date end: ", $q->textfield(-name=>END_DATE, -size=>10)])), "\n";
-    print $q->Tr($q->td(["Only latest:", $q->checkbox(-name=>ONLY_MOST_RECENT, -label=>'')])), "\n";
-    print $q->Tr($q->td(["Status:", $q->scrolling_list(
-        -name=>SUBMITTED, -values=>[SUBMITTED_YES, SUBMITTED_NO], -multiple=>1, -default=>[SUBMITTED_YES, SUBMITTED_NO],
-        -labels=>{SUBMITTED_YES() => "Submitted",
-                  SUBMITTED_NO() => "Not Submitted"})])), "\n";
-    print $q->Tr($q->td(["Due:", $q->scrolling_list(
-        -name=>DUE, -values=>[DUE_PAST, DUE_FUTURE], -multiple=>1, -default=>[DUE_PAST, DUE_FUTURE],
-        -labels=>{DUE_PAST() => "Past",
-                  DUE_FUTURE() => "Future"})])), "\n";
-    print $q->Tr($q->td(["Sort by: ", $q->scrolling_list(
-        -name=>SORTING, -values=>[SORTING_FOLDER, SORTING_USER, SORTING_DATE],
-        -labels=>{SORTING_FOLDER() => "Folder",
-                  SORTING_USER() => "User",
-                  SORTING_DATE() => "Date"})])), "\n";
+    println $q->h3("Search");
+    println $q->start_form(-action=>$global_config->cgi_url);
+    println $q->start_table();
+    println row("User:", $q->scrolling_list(
+                    -name=>USERS, -style=>'width:100%;',
+                    -multiple=>1, -size=>3,
+                    -values=>\@all_users,
+                    -default=>\@all_users));
+    println row("Folder:", $q->scrolling_list(
+                    -name=>FOLDERS, -style=>'width:100%;',
+                    -multiple=>1, -size=>3
+                    -values=>\@all_folders,
+                    -default=>\@all_folders));
+    println row("Date start: ",
+                $q->textfield(-style=>'width:100%;', -name=>START_DATE));
+    println row("Date end: ",
+                $q->textfield(-style=>'width:100%;', -name=>END_DATE));
+    println row("Only latest:",
+                $q->checkbox(-name=>ONLY_MOST_RECENT, -label=>''));
+    println row("Status:", $q->scrolling_list(
+                    -name=>SUBMITTED, -style=>'width:100%;', -multiple=>1,
+                    -values=>[SUBMITTED_YES, SUBMITTED_NO],
+                    -default=>[SUBMITTED_YES, SUBMITTED_NO],
+                    -labels=>{SUBMITTED_YES() => "Submitted",
+                              SUBMITTED_NO() => "Not Submitted"}));
+    println row("Due:", $q->scrolling_list(
+                    -name=>DUE, -style=>'width:100%;', -multiple=>1,
+                    -values=>[DUE_PAST, DUE_FUTURE],
+                    -default=>[DUE_PAST, DUE_FUTURE],
+                    -labels=>{DUE_PAST() => "Past",
+                              DUE_FUTURE() => "Future"}));
+    println row("Sort by: ", $q->scrolling_list(
+                    -name=>SORTING, -style=>'width:100%;',
+                    -values=>[SORTING_FOLDER, SORTING_USER, SORTING_DATE],
+                    -labels=>{SORTING_FOLDER() => "Folder",
+                              SORTING_USER() => "User",
+                              SORTING_DATE() => "Date"}));
 
-    print $q->Tr($q->td(["",$q->submit(-value=>"Search")])), "\n";
-    print $q->end_table();
-    print $q->end_form();
+    println row("", $q->submit(-value=>"Search"));
+    println $q->end_table();
+    println $q->end_form();
 }
 
 sub check_folder {
     foreach my $folder (list_folders(@folders)) {
         foreach my $user (list_users($folder->name)) {
             foreach my $date (list_dates($folder->name, $user->name)) {
-                print $q->h2("Checking", $folder->name, "for", $user->name,
-                             "on", $date), "\n";
+                println $q->h3("Checking", $folder->name, "for", $user->name,
+                             "on", $date);
                 foreach my $checker (@{$folder->checkers}) {
                     system @$checker, join(
                         '/', DIR, $folder_files, $folder->name,
@@ -298,11 +312,11 @@ sub search_results {
     }
 
     # Print
-    print $q->h3("Uploaded Files"), "\n";
-    print $q->start_table({-border=>2}), "\n";
-    print $q->thead(
+    println $q->h3("Uploaded Files");
+    println $q->start_table({-border=>2});
+    println $q->thead(
         $q->Tr($q->th(["Folder", "Title", "User", "Name",
-                       "Date", "Check", "File", "Size (bytes)"]))), "\n";
+                       "Date", "Check", "File", "Size (bytes)"])));
     foreach my $row (sort {($sorting eq SORTING_USER and
                             $a->user->name cmp $b->user->name) or
                             ($sorting eq SORTING_DATE and
@@ -310,18 +324,20 @@ sub search_results {
                              ($a->folder->name cmp $b->folder->name) or
                              ($a->user->name cmp $b->user->name) or
                              ($a->date cmp $b->date)} @rows) {
-        print $q->start_Tr(), "\n";
-        print $q->td([
+        println $q->start_Tr();
+        println $q->td([
             $row->folder->name, $row->folder->title, $row->user->name,
-            $row->user->full_name, $row->date,
-            $row->date ? $q->a({-href=>form_url(
+            $row->user->full_name]);
+        println $q->td([
+            $row->date,
+            $q->a({-href=>form_url(
                         ACTION_CHECK_FOLDER, 1, FOLDERS, $row->folder->name,
                         USERS, $row->user->name, START_DATE, $row->date,
-                        END_DATE, $row->date)}, "[check]") : '']), "\n";
+                        END_DATE, $row->date)}, "[check]")]) if $row->date;
 
         my $first = 1;
         foreach my $file (sort @{$row->files}) {
-            print $q->end_Tr(), $q->start_Tr(), $q->td({colspan=>6}), "\n"
+            println $q->end_Tr(), $q->start_Tr(), $q->td({colspan=>6})
                 unless $first;
             $first = 0;
 
@@ -334,10 +350,10 @@ sub search_results {
 
             print $q->td({-align=>'right'}, $file->size);
         }
-        print $q->end_Tr(), "\n";
+        println $q->end_Tr();
     }
 
-    print $q->end_table(), "\n";
+    println $q->end_table();
 }
 
 sub folder_results {
@@ -345,41 +361,38 @@ sub folder_results {
     my @folders = list_folders(@folders);
 
     # Print
-    print $q->h3("Uploads for $remote_user");
-    print $q->start_table({-border=>2}), "\n";
+    println $q->h3("Uploads for $remote_user");
+    println $q->start_table({-border=>2});
     foreach my $folder (@folders) {
-        print list_dates($folder, $remote_user), "\n";
-        if (filter_submitted($folder, $remote_user)) {
-        print $q->h3($folder->name . ":", $folder->title,
-                     " (due " . $folder->due . ")"), "\n";
-        print $q->div($folder->text), "\n";
+        println list_dates($folder, $remote_user);
+        if (list_dates($folder->name, $remote_user)
+            ? $submitted_yes : $submitted_no) {
+            println $q->h3($folder->name . ":", $folder->title,
+                           " (due " . $folder->due . ")");
+            println $q->div($folder->text);
 
-        print $q->start_form(-method=>'POST', -action=>$global_config->cgi_url,
-                             -enctype=>&CGI::MULTIPART);
-        print $q->hidden(
-            -name=>FOLDERS, -value=>$folder->name, -override=>1), "\n";
-        for (my $i = 0; $i < $folder->file_count; $i++) {
-            print $q->p("File", $i+1 . ":",
-                        $q->filefield(-name=>FILE, -override=>1)), "\n";
-        }
-        print $q->p($q->checkbox(-name=>ACTION_CHECK_FOLDER,
-                                 -checked=>1, -override=>1,
-                                 -label=>"Check after upload")), "\n";
-        print $q->submit(ACTION_UPLOAD_FILES, "Upload files"), "\n";
-        print $q->end_form(), "\n";
+            println $q->start_form(
+                -method=>'POST', -action=>$global_config->cgi_url,
+                -enctype=>&CGI::MULTIPART);
+            println $q->hidden(
+                -name=>FOLDERS, -value=>$folder->name, -override=>1);
+            for (my $i = 0; $i < $folder->file_count; $i++) {
+                println $q->p("File", $i+1 . ":",
+                              $q->filefield(-name=>FILE, -override=>1));
+            }
+            println $q->p($q->checkbox(-name=>ACTION_CHECK_FOLDER,
+                                       -checked=>1, -override=>1,
+                                       -label=>"Check after upload"));
+            println $q->submit(ACTION_UPLOAD_FILES, "Upload files");
+            println $q->end_form();
         }
     }
-    print $q->end_table(), "\n";
+    println $q->end_table();
 }
 
 ################
 # Listings
 ################
-
-sub filter_submitted {
-    my ($folder, $user) = @_;
-    return list_dates($folder->name, $user) ? $submitted_yes : $submitted_no;
-}
 
 sub list_folders {
     map { FolderConfig->new(name => $_, read_config($folder_configs, $_)) } @_;
@@ -420,6 +433,8 @@ sub form_url {
     }
     return $str;
 }
+
+sub row { return $q->Tr($q->td([@_])); }
 
 ################
 # General Util
