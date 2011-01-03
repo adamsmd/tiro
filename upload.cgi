@@ -2,6 +2,7 @@
 use warnings; # Full warnings
 use strict; # Strict error checking
 $|++; # Unbuffer stdout
+umask 0077; # Default to private files
 
 # Modules from Core
 use CGI qw/-private_tempfiles/;
@@ -21,13 +22,13 @@ use Date::Manip;
 #  - select subset of checkers to run
 #  - groups (group submits)
 #  - detailed sort-by
-#  - file_name regex
+#  - file_name regex (as validator)
 #  - check configs are valid
 #  - highlight incomplete submissions
 #  - Admin interface (but be clear what it looks like to student)
 #  - hilight "overdue" in red or bold
 #  - zebra stripes (one in three)
-#  - Upload chmod?
+#  - Upload chmod for group?
 #  - error handling
 #  - HTML formatting / CSS classes
 #  - Separate upload page (so full assignment can be listed)
@@ -80,14 +81,13 @@ struct(File=>[name=>'$', size=>'$']);
 # Setup
 ################
 
-my $q = CGI->new;
-
-my $error = $q->cgi_error(); # TODO
-if ($error) { error($error); }
-
 my $global_config = GlobalConfig->new(read_config(GLOBAL_CONFIG_FILE));
 $CGI::POST_MAX = $global_config->post_max;
 ($ENV{PATH}) = $global_config->path;
+
+my $q = CGI->new;
+my $error = $q->cgi_error();
+die $error if $error;
 
 ################
 # Inputs
@@ -200,7 +200,6 @@ sub upload {
 
     mkpath($target_dir) or die; # TODO: error message (sleep 1)
     foreach my $file ($q->upload(FILE)) {
-        die if not $file; # TODO: error message
         my ($name) = $file =~ FILE_RE;
         copy($file, "$target_dir/$name") or die "Move failed $!"; # TODO die and error message
     }
@@ -290,7 +289,7 @@ sub check_folder {
                     println $q->h4("Running check", $i+1, "of", $len);
                     $passed++ if 0 == system @{$folder->checkers->[$i]}, join(
                         '/', DIR, $folder_files, $folder->name,
-                        $user->name, $date);
+                        $user->name, $date) or die; # TODO: error message
                 }
                 println $q->h4($passed, "of", $len, "passed");
             }
@@ -450,9 +449,8 @@ sub row { return $q->Tr($q->td([@_])); }
 ################
 
 sub read_config {
-    my $filename = join '/', DIR, @_;
     local $/;
-    open(my $fh, '<', $filename) or die "No file $filename\n"; # TODO: error msg
+    open(my $fh, '<', join('/', DIR, @_)) or die; # TODO: error msg
     my $obj = decode_json(<$fh> =~ TRUSTED_RE);
     return %$obj;
 }
@@ -464,10 +462,7 @@ sub intersect {
 }
 
 sub dir_list {
-    my $dir = join '/', DIR, @_;
-
-    # TODO: die on error and error message
-    my $d = DirHandle->new($dir);
+    my $d = DirHandle->new(join '/', DIR, @_);
     my @ds = $d ? $d->read : ();
     $d->close if $d;
     @ds = grep {!/^\./} @ds; # skip dot files
