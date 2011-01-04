@@ -17,7 +17,6 @@ use JSON;
 use Date::Manip;
 
 # Future features:
-#  + HTML container for validator output
 #  - When no folders specified use different text for result pane
 #  - select subset of checkers to run
 #  - groups (group submits)
@@ -37,6 +36,10 @@ use Date::Manip;
 #  - Full URL to cgi.cs.indiana.edu? url()
 #  - Server error on upload with no file
 #  - config file validator
+#  - struct for checker names?
+#  - Folder edit: link under browse?, new (link under browse), delete, active, rename, validate config
+#  - Upload page? (link under browse)
+#  - Issue warning when clobbering files due to same name
 
 # NOTE: uploading multiple file w/ same name clobbers older files
 
@@ -108,6 +111,7 @@ my @due_tmp = $q->param(DUE) ? $q->param(DUE) : (DUE_PAST, DUE_FUTURE);
 my $due_past = (grep { $_ eq DUE_PAST } @due_tmp) ? 1 : 0;
 my $due_future = (grep { $_ eq DUE_FUTURE } @due_tmp) ? 1 : 0;
 my ($sorting) = ($q->param(SORTING) or "") =~ /^([A-Za-z0-9_]*)$/;
+my $check_folder = $q->param(ACTION_CHECK_FOLDER) ? 1 : 0;
 
 # Directories
 my ($folder_configs) = $global_config->folder_configs =~ FILE_RE;
@@ -172,7 +176,6 @@ else {
 
     println $q->start_div({-style=>'margin-left:21em'});
     search_results();
-    check_folder() if $q->param(ACTION_CHECK_FOLDER);
     folder_results();
     println $q->end_div();
 
@@ -277,26 +280,6 @@ sub search_form {
     println $q->end_form();
 }
 
-sub check_folder {
-    foreach my $folder (list_folders(@folders)) {
-        foreach my $user (list_users($folder->name)) {
-            foreach my $date (list_dates($folder->name, $user->name)) {
-                println $q->h3("Checking", $folder->name, "for", $user->name,
-                             "on", $date);
-                my $len = @{$folder->checkers};
-                my $passed = 0;
-                foreach my $i (0..$len-1) {
-                    println $q->h4("Running check", $i+1, "of", $len);
-                    $passed++ if 0 == system @{$folder->checkers->[$i]}, join(
-                        '/', DIR, $folder_files, $folder->name,
-                        $user->name, $date) or die; # TODO: error message
-                }
-                println $q->h4($passed, "of", $len, "passed");
-            }
-        }
-    }
-}
-
 sub search_results {
     # Search
     my @rows;
@@ -319,7 +302,7 @@ sub search_results {
         }
     }
 
-    # Print
+    # Print and run checks
     #println $q->h2("Files");
     println $q->start_table({-border=>2});
     println $q->thead(
@@ -359,6 +342,35 @@ sub search_results {
             print $q->td({-align=>'right'}, $file->size);
         }
         println $q->end_Tr();
+
+        if ($check_folder and $row->date) {
+            my $len = @{$row->folder->checkers};
+            my $passed = 0;
+            foreach my $i (0..$len-1) {
+                println $q->Tr($q->td({colspan=>1}),
+                               $q->td({colspan=>0},
+                                      "Running",
+                                      $row->folder->checkers->[$i]->[0],
+                                      "check", "(" . ($i+1), "of", $len . ")"));
+                println $q->start_Tr();
+                println $q->td({colspan=>2}), $q->start_td({colspan=>0});
+                println $q->start_div();
+                system @{$row->folder->checkers->[$i]->[1]}, join(
+                    '/', DIR, $folder_files, $row->folder->name,
+                    $row->user->name, $row->date);
+                die if $? == -1; # TODO: error message (failed to exec)
+                $passed++ unless $?;
+                println $q->end_div();
+                println $q->end_td();
+                println $q->end_Tr();
+                println $q->Tr($q->td({colspan=>2}),
+                               $q->td({colspan=>0}, $? ? "Failed" : "Passed"));
+            }
+            println $q->Tr($q->td({colspan=>1}),
+                           $q->td({colspan=>0},
+                                  "Passed", $passed, "of", $len, "checks"));
+
+        }
     }
 
     println $q->end_table();
