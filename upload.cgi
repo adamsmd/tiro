@@ -214,7 +214,7 @@ sub upload {
     my %names;
     foreach my $file ($q->upload(FILE)) {
         my ($name) = $file =~ FILE_RE;
-        error "Duplicate file name: '$name'" if $names{$name}
+        error "Duplicate file name: '$name'" if $names{$name};
         $names{$name} = 1;
     }
 
