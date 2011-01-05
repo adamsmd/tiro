@@ -7,6 +7,7 @@ umask 0077; # Default to private files
 # Modules from Core
 use CGI qw/-private_tempfiles/;
 use Class::Struct;
+use File::Basename;
 use File::Copy; # copy() but move() has tainting issues
 use File::Path qw/mkpath/;
 use DirHandle;
@@ -20,10 +21,8 @@ use Date::Manip;
 # * Critical
 #  - file_name regex (as validator)
 #  - config file validator
-#  - error message for non registered user
-#  - difference between non-registered and non-active user
 # * Non-critical
-#  - groups (group submits)
+#  - groups (group submits) by symlinking assignment folders together
 #  - highlight incomplete submissions
 #  - Admin interface (but be clear what it looks like to student)
 #  - hilight "overdue" in red or bold
@@ -52,39 +51,33 @@ use constant DIR => "/u-/adamsmd/projects/upload/demo";
 use constant GLOBAL_CONFIG_FILE => "global_config.json";
 
 # CGI Constants
+use constant HEADER_OCTET_STREAM => 'application/octet-stream';
+use constant HTTP_SEE_OTHER => 303;
 use constant { ACTION_DOWNLOAD_FILE => "download_file",
                ACTION_UPLOAD_FILES => "upload_files" };
 use constant { USERS => "users", FOLDERS => "folders",
                START_DATE => "start_date", END_DATE => "end_date",
-               ONLY_MOST_RECENT => "only_most_recent",
-               CHECK_FOLDERS => "check_folders" };
-use constant HEADER_OCTET_STREAM => 'application/octet-stream';
-use constant HTTP_SEE_OTHER => 303;
-use constant FILE => 'file';
+               ONLY_LATEST => "only_latest", CHECK_FOLDERS => "check_folders" };
+use constant { SUBMITTED => 'submitted',
+               SUBMITTED_YES => 'yes', SUBMITTED_NO => 'no' };
 use constant { DUE => 'due', DUE_PAST => 'past', DUE_FUTURE => 'future' };
-use constant {
-    SUBMITTED => 'submitted', SUBMITTED_YES => 'yes', SUBMITTED_NO => 'no' };
-use constant { SORTING => 'sorting', SORTING_FOLDER => 'sorting_folder',
-               SORTING_USER => 'sorting_user', SORTING_DATE => 'sorting_date' };
+use constant { SORTING => 'sorting', SORTING_FOLDER => 'folder',
+               SORTING_USER => 'user', SORTING_DATE => 'date' };
+use constant { FILE => 'file' };
 
-# Other constants
-use constant DATE_FORMAT => "%O"; # TODO: Put in global config?
-use constant FILE_RE => qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/;
-use constant TRUSTED_RE => qr/^(.*)$/s;
-use constant DATE_RE => qr/^([A-Za-z0-9:-]+)$/;
-
-my @row_colors = ('white', '#DDD');
+# String formats
+sub trusted ($) { ($_[0] =~ /^(.*)$/s)[0]; }
+sub date ($) { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
+sub file ($) { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
 
 # Structs
 struct(GlobalConfig=>[title=>'$', folder_configs=>'$', folder_files=>'$',
-                      cgi_url=>'$', path=>'$', # Path for checkers
-                      post_max=>'$', admins=>'*@', users=>'*%' ]);
-struct(UserConfig=>[ name => '$', full_name => '$']);
+                      cgi_url=>'$', path=>'$', # Env PATH for checkers
+                      post_max=>'$', admins=>'*@', users=>'*%']);
+struct(UserConfig=>[name => '$', full_name => '$', expires => '$']);
 struct(FolderConfig=>[name=>'$', title=>'$', text=>'$', due=>'$',
                       file_count=>'$', checkers=>'@']);
-struct(Row=>[
-           folder=>'FolderConfig', user=>'UserConfig', date=>'$', files=>'@']);
-struct(File=>[name=>'$', size=>'$']);
+struct(Row=>[folder=>'FolderConfig',user=>'UserConfig',date=>'$',files=>'@']);
 
 ################
 # Setup
@@ -103,51 +96,46 @@ die $error if $error;
 ################
 
 # Dates
-my ($start_date) =
-    (UnixDate($q->param(START_DATE), DATE_FORMAT) or "") =~ DATE_RE;
-my ($end_date) = (UnixDate($q->param(END_DATE), DATE_FORMAT) or "") =~ DATE_RE;
-my ($now) = (UnixDate("now", DATE_FORMAT) or "") =~ DATE_RE;
+my $start_date = date $q->param(START_DATE);
+my $end_date = date $q->param(END_DATE);
+my $now = date "now";
 
 # Flags
-my $only_most_recent = $q->param(ONLY_MOST_RECENT) ? 1 : 0;
+my $only_latest = $q->param(ONLY_LATEST) ? 1 : 0;
 my $check_folder = $q->param(CHECK_FOLDERS) ? 1 : 0;
 
 # Semi-flags
-my @submitted_tmp = $q->param(SUBMITTED)
-    ? $q->param(SUBMITTED) : (SUBMITTED_YES, SUBMITTED_NO);
-my $submitted_yes = (grep { $_ eq SUBMITTED_YES } @submitted_tmp) ? 1 : 0;
-my $submitted_no = (grep { $_ eq SUBMITTED_NO } @submitted_tmp) ? 1 : 0;
-
-my @due_tmp = $q->param(DUE) ? $q->param(DUE) : (DUE_PAST, DUE_FUTURE);
-my $due_past = (grep { $_ eq DUE_PAST } @due_tmp) ? 1 : 0;
-my $due_future = (grep { $_ eq DUE_FUTURE } @due_tmp) ? 1 : 0;
+my $submitted_yes = member(SUBMITTED_YES, 1, $q->param(SUBMITTED));
+my $submitted_no = member(SUBMITTED_NO, 1, $q->param(SUBMITTED));
+my $due_past = member(DUE_PAST, 1, $q->param(DUE));
+my $due_future = member(DUE_FUTURE, 1, $q->param(DUE));
 
 my ($sorting) = ($q->param(SORTING) or "") =~ /^([A-Za-z0-9_]*)$/;
 
 # Directories
-my ($folder_configs) = $global_config->folder_configs =~ FILE_RE;
-my ($folder_files) = $global_config->folder_files =~ FILE_RE;
+my $folder_configs = file $global_config->folder_configs;
+my $folder_files = file $global_config->folder_files;
 
 # User
-my ($remote_user) = ($q->remote_user() or "") =~ FILE_RE;
+my $remote_user = file $q->remote_user();
 $remote_user="user1";
-my $is_admin = grep { $_ eq $remote_user } @{$global_config->admins};
+my $is_admin = member($remote_user, 0, @{$global_config->admins});
 my @all_users = sort keys %{$global_config->users};
 @all_users = sort (intersect(\@all_users, [$remote_user])) unless $is_admin;
 my @users = $q->param(USERS) ? $q->param(USERS) : @all_users;
-@users = sort map { $_ =~ FILE_RE } @users;
+@users = sort map { file $_ } @users;
 @users = sort (intersect(\@all_users, \@users));
 
 # Download file
-my ($file) = ($q->param(FILE) or "") =~ FILE_RE;
+my $file = file $q->param(FILE);
 
 # Folders
 my @all_folders = dir_list($global_config->folder_configs);
-my @folders = map { $_ =~ FILE_RE } $q->param(FOLDERS);
+my @folders = map { file $_ } $q->param(FOLDERS);
 @folders = sort (intersect(\@all_folders, \@folders));
 @folders = map { $_->name }
-           grep { $due_past and $_->due le $now or
-                  $due_future and $_->due gt $now} list_folders(@folders);
+    grep { $due_past and $_->due le $now or $due_future and $_->due gt $now}
+    list_folders(@folders);
 
 # Other inputs
 #  param: ACTION_*
@@ -170,12 +158,19 @@ my @folders = map { $_ =~ FILE_RE } $q->param(FOLDERS);
 
 sub println { print @_, "\n"; }
 
+error("No such user: $remote_user") unless
+    exists $global_config->users->{$remote_user};
+error("Access for '$remote_user' expired as of ",
+      user($remote_user)->expires, ".") unless
+    $now lt date(user($remote_user)->expires);
+
 if ($q->param(ACTION_DOWNLOAD_FILE)) { download(); }
 elsif ($q->param(ACTION_UPLOAD_FILES)) { upload(); }
 else {
     print $q->header();
-    println $q->start_html(-title=>$global_config->title,
-                           -style=>{-verbatim=>'td { vertical-align:top; } th { text-align: left; }'});
+    println $q->start_html(
+        -title=>$global_config->title,
+        -style=>{-verbatim=>'td, th { vertical-align:top; text-align:left; }'});
     println $q->h1($global_config->title);
     println $q->start_div();
 
@@ -224,8 +219,7 @@ sub upload {
     $q->upload(FILE) or error "No files selected for upload.";
     my $folder = $folders[0] or error "No folder selected for upload.";
     my %names;
-    foreach my $file ($q->upload(FILE)) {
-        my ($name) = $file =~ FILE_RE;
+    foreach my $name (map { file $_ } $q->upload(FILE)) {
         error "Duplicate file name: '$name'" if $names{$name};
         $names{$name} = 1;
     }
@@ -234,7 +228,7 @@ sub upload {
     mkpath($target_dir) or
         error "Can't create folder '$folder,$remote_user,$now' for upload: $!";
     foreach my $file ($q->upload(FILE)) {
-        my ($name) = $file =~ FILE_RE;
+        my $name = file $file;
         copy($file, "$target_dir/$name") or
             error "Can't store file '$folder,$remote_user,$now,$name'",
                   " for upload: $!";
@@ -279,7 +273,7 @@ sub search_form {
          ["Date start: ",
           $q->textfield(-style=>'width:100%;', -name=>START_DATE)],
          ["Date end: ", $q->textfield(-style=>'width:100%;', -name=>END_DATE)],
-         ["Only latest:", $q->checkbox(-name=>ONLY_MOST_RECENT, -label=>'')],
+         ["Only latest:", $q->checkbox(-name=>ONLY_LATEST, -label=>'')],
          ["Run checks:", $q->checkbox(-name=>CHECK_FOLDERS, -label=>'')],
          ["Status:", $q->scrolling_list(
               -name=>SUBMITTED, -style=>'width:100%;', -multiple=>1,
@@ -313,7 +307,8 @@ sub search_results {
                     foreach my $date (@dates) { # TODO: or none exist
                         push @rows, Row->new(
                             folder=>$folder, user=>$user, date=>$date,
-                            files=>[list_files($folder->name, $user->name, $date)]);
+                            files=>[dir_list($folder_files, $folder->name,
+                                             $user->name, $date)]);
                     }
                 }
             } else {
@@ -333,11 +328,13 @@ sub search_results {
 
     # Print and run checks
     # NOTE: Perl Idiom: @{[expr]} interpolates an arbitrary expr into a string
-    println "<table style='width:100%;border-collapse: collapse;'><thead style='border-bottom:2px solid black';><tr>",
+    println "<table style='width:100%;border-collapse: collapse;'>
+             <thead style='border-bottom:2px solid black';><tr>",
         th('Folder', 'Title', 'User', 'Name', 'Date', 'Check',
            'Files', 'Size (bytes)'), "</tr></thead>";
     if (not @rows) {
-        println "<tr><td colspan=8><center>No results to display.  Browse or search to select folders.</center></td></tr>";
+        println "<tr><td colspan=8><center>No results to display. 
+                 Browse or search to select folders.</center></td></tr>";
     } else {
         my $row_num = 0;
         foreach my $row (@rows) {
@@ -352,14 +349,17 @@ sub search_results {
                 "<td colspan=2>(No submissions)</td>";
             if (@{$row->files}) {
                 println join "</tr><tr><td colspan=6></td>",
-                    map { $link = form_url(
+                    map { my $link = form_url(
                               ACTION_DOWNLOAD_FILE, 1,
                               FOLDERS, $row->folder->name,
                               USERS, $row->user->name, START_DATE, $row->date, 
-                              END_DATE, $row->date, FILE, $_->name);
-                          "<td><a href='$link'>@{[$_->name]}</a></td>
-                           <td align='right'>@{[$_->size]}</td>" }
-                    sort @{$row->files}
+                              END_DATE, $row->date, FILE, $_);
+                          my $size = -s join(
+                              '/', DIR, $folder_files, $row->folder->name,
+                              $row->user->name, $row->date, $_);
+                          "<td><a href='$link'>$_</a></td>
+                           <td style='text-align: right;'>$size</td>"
+                    } @{$row->files};
             } else { println "<td colspan=2>(No files)</td>"; }
             println "</tr>";
             if ($check_folder and $row->date) {
@@ -425,30 +425,23 @@ sub folder_results {
 # Listings
 ################
 
-sub list_folders {
-    map { FolderConfig->new(name => $_, read_config($folder_configs, $_)) } @_;
-}
+sub folder { FolderConfig->new(
+                 name => $_[0], read_config($folder_configs, $_[0])) }
+sub list_folders { map { folder $_ } @_; }
 
-sub list_users {
-    map { UserConfig->new(name => $_, %{$global_config->users->{$_}}) } @users;
-}
+sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
+sub list_users { map { user $_ } @users; }
 
 sub list_dates {
     my ($folder, $user) = @_;
     my $dir = join('/', $folder_files, $folder, $user);
     my @dates = dir_list($dir);
-    @dates = map { $_ =~ DATE_RE } @dates;
+    @dates = map { date $_ } @dates;
     @dates = grep { -d (DIR . "/$dir/$_") } @dates;
     @dates = grep {$start_date le $_} @dates if $start_date;
     @dates = grep {$end_date ge $_} @dates if $end_date;
-    @dates = ($dates[$#dates]) if $#dates != -1 and $only_most_recent;    
+    @dates = ($dates[$#dates]) if $#dates != -1 and $only_latest;    
     return @dates;
-}
-
-sub list_files {
-    my ($folder, $user, $date) = @_;
-    my $dir = join('/', $folder_files, $folder, $user, $date);
-    map { File->new(name => $_, size => -s DIR . "/$dir/$_") } dir_list($dir);
 }
 
 ################
@@ -474,10 +467,16 @@ sub rows { $q->start_table(); map { println row(@$_) } @_; }
 # General Util
 ################
 
+sub member {
+    my ($value, $default, @list) = @_;
+    return $default unless @list;
+    return (grep { $_ eq $value } @list) ? 1 : 0;
+}
+
 sub read_config {
     local $/;
-    open(my $fh, '<', join('/', DIR, @_)) or die; # TODO: error msg
-    my $obj = decode_json(<$fh> =~ TRUSTED_RE);
+    open(my $fh, '<', join('/', DIR, @_)) or die $!; # TODO: error msg
+    my $obj = decode_json(trusted <$fh>);
     return %$obj;
 }
 
