@@ -17,26 +17,32 @@ use JSON;
 use Date::Manip;
 
 # Future features:
-#  - select subset of checkers to run
-#  - groups (group submits)
-#  - detailed sort-by
+# * Critical
 #  - file_name regex (as validator)
-#  - check configs are valid
+#  - config file validator
+#  - error message for non registered user
+#  - difference between non-registered and non-active user
+# * Non-critical
+#  - groups (group submits)
 #  - highlight incomplete submissions
 #  - Admin interface (but be clear what it looks like to student)
 #  - hilight "overdue" in red or bold
-#  - zebra stripes (one in three) (each tbody)
 #  - Upload chmod for group?
 #  - HTML formatting / CSS classes
-#  - Separate upload page (so full assignment can be listed)
 #  - Download tar-ball.
 #  - Use path_info() to dispatch upload, download and pre-upload(?)
 #  - Full URL to cgi.cs.indiana.edu? url()
-#  - Server error on upload with no file
-#  - config file validator
 #  - struct for checker names?
 #  - Folder edit: link under browse?, new (link under browse), delete, active, rename, validate config
+#  - Hilight sorted column
+#  - file size with commas
+# * Considering not adding
 #  - Upload page? (link under browse)
+#  - Check box for show upload form
+# * Seriously Considering not adding
+#  - select subset of checkers to run
+#  - detailed sort-by
+#  - Separate upload page (so full assignment can be listed)
 
 # NOTE: uploading multiple file w/ same name clobbers older files
 
@@ -47,11 +53,11 @@ use constant GLOBAL_CONFIG_FILE => "global_config.json";
 
 # CGI Constants
 use constant { ACTION_DOWNLOAD_FILE => "download_file",
-               ACTION_UPLOAD_FILES => "upload_files",
-               ACTION_CHECK_FOLDER => "check_folder" };
+               ACTION_UPLOAD_FILES => "upload_files" };
 use constant { USERS => "users", FOLDERS => "folders",
                START_DATE => "start_date", END_DATE => "end_date",
-               ONLY_MOST_RECENT => "only_most_recent" };
+               ONLY_MOST_RECENT => "only_most_recent",
+               CHECK_FOLDERS => "check_folders" };
 use constant HEADER_OCTET_STREAM => 'application/octet-stream';
 use constant HTTP_SEE_OTHER => 303;
 use constant FILE => 'file';
@@ -66,6 +72,8 @@ use constant DATE_FORMAT => "%O"; # TODO: Put in global config?
 use constant FILE_RE => qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/;
 use constant TRUSTED_RE => qr/^(.*)$/s;
 use constant DATE_RE => qr/^([A-Za-z0-9:-]+)$/;
+
+my @row_colors = ('white', '#DDD');
 
 # Structs
 struct(GlobalConfig=>[title=>'$', folder_configs=>'$', folder_files=>'$',
@@ -102,15 +110,19 @@ my ($now) = (UnixDate("now", DATE_FORMAT) or "") =~ DATE_RE;
 
 # Flags
 my $only_most_recent = $q->param(ONLY_MOST_RECENT) ? 1 : 0;
+my $check_folder = $q->param(CHECK_FOLDERS) ? 1 : 0;
+
+# Semi-flags
 my @submitted_tmp = $q->param(SUBMITTED)
     ? $q->param(SUBMITTED) : (SUBMITTED_YES, SUBMITTED_NO);
 my $submitted_yes = (grep { $_ eq SUBMITTED_YES } @submitted_tmp) ? 1 : 0;
 my $submitted_no = (grep { $_ eq SUBMITTED_NO } @submitted_tmp) ? 1 : 0;
+
 my @due_tmp = $q->param(DUE) ? $q->param(DUE) : (DUE_PAST, DUE_FUTURE);
 my $due_past = (grep { $_ eq DUE_PAST } @due_tmp) ? 1 : 0;
 my $due_future = (grep { $_ eq DUE_FUTURE } @due_tmp) ? 1 : 0;
+
 my ($sorting) = ($q->param(SORTING) or "") =~ /^([A-Za-z0-9_]*)$/;
-my $check_folder = $q->param(ACTION_CHECK_FOLDER) ? 1 : 0;
 
 # Directories
 my ($folder_configs) = $global_config->folder_configs =~ FILE_RE;
@@ -138,8 +150,8 @@ my @folders = map { $_ =~ FILE_RE } $q->param(FOLDERS);
                   $due_future and $_->due gt $now} list_folders(@folders);
 
 # Other inputs
-#  param: $ACTION_*
-#  upload: $UPLOAD_FILE
+#  param: ACTION_*
+#  upload: UPLOAD_FILE
 #  dir_list: list_dates list_files
 #  config:
 #   Printing only:
@@ -163,7 +175,7 @@ elsif ($q->param(ACTION_UPLOAD_FILES)) { upload(); }
 else {
     print $q->header();
     println $q->start_html(-title=>$global_config->title,
-                           -style=>{-verbatim=>'td { vertical-align:top; }'});
+                           -style=>{-verbatim=>'td { vertical-align:top; } th { text-align: left; }'});
     println $q->h1($global_config->title);
     println $q->start_div();
 
@@ -227,11 +239,10 @@ sub upload {
             error "Can't store file '$folder,$remote_user,$now,$name'",
                   " for upload: $!";
     }
-    print $q->redirect(
-        -uri=>form_url(ACTION_CHECK_FOLDER, $q->param(ACTION_CHECK_FOLDER),
-                       FOLDERS, $folder, USERS, $remote_user,
-                       START_DATE, $now, END_DATE, $now),
-        -status=>HTTP_SEE_OTHER);
+    print $q->redirect(-uri=>form_url(CHECK_FOLDERS, $q->param(CHECK_FOLDERS),
+                                      FOLDERS, $folder, USERS, $remote_user,
+                                      START_DATE, $now, END_DATE, $now),
+                       -status=>HTTP_SEE_OTHER);
 }
 
 sub browse_folders {
@@ -257,7 +268,7 @@ sub browse_folders {
 sub search_form {
     # Print
     println $q->h3("Search");
-    println $q->start_form(-action=>$global_config->cgi_url);
+    println $q->start_form(-action=>$global_config->cgi_url, -method=>'GET');
     println $q->start_table();
     rows(["User:", $q->scrolling_list(
               -name=>USERS, -style=>'width:100%;', -multiple=>1, -size=>3,
@@ -269,7 +280,7 @@ sub search_form {
           $q->textfield(-style=>'width:100%;', -name=>START_DATE)],
          ["Date end: ", $q->textfield(-style=>'width:100%;', -name=>END_DATE)],
          ["Only latest:", $q->checkbox(-name=>ONLY_MOST_RECENT, -label=>'')],
-         ["Run checks:", $q->checkbox(-name=>ACTION_CHECK_FOLDER, -label=>'')],
+         ["Run checks:", $q->checkbox(-name=>CHECK_FOLDERS, -label=>'')],
          ["Status:", $q->scrolling_list(
               -name=>SUBMITTED, -style=>'width:100%;', -multiple=>1,
               -values=>[SUBMITTED_YES, SUBMITTED_NO],
@@ -322,51 +333,58 @@ sub search_results {
 
     # Print and run checks
     # NOTE: Perl Idiom: @{[expr]} interpolates an arbitrary expr into a string
-    println "<table border='2'><thead><tr>",
+    println "<table style='width:100%;border-collapse: collapse;'><thead style='border-bottom:2px solid black';><tr>",
         th('Folder', 'Title', 'User', 'Name', 'Date', 'Check',
-           'File', 'Size (bytes)'), "</tr></thead>";
+           'Files', 'Size (bytes)'), "</tr></thead>";
     if (not @rows) {
-        println "<tr><td colspan=0><center>No results to display.  Browse or search to select folders.</center></td></tr>";
+        println "<tr><td colspan=8><center>No results to display.  Browse or search to select folders.</center></td></tr>";
     } else {
-        for my $row (@rows) {
-            my $link = form_url(
-                ACTION_CHECK_FOLDER, 1, FOLDERS, $row->folder->name,
-                USERS, $row->user->name, START_DATE, $row->date,
-                END_DATE, $row->date);
-            println "<tbody><tr>",
+        my $row_num = 0;
+        foreach my $row (@rows) {
+            my $link = form_url(CHECK_FOLDERS, 1, FOLDERS, $row->folder->name,
+                                USERS, $row->user->name, START_DATE, $row->date,
+                                END_DATE, $row->date);
+            println "<tbody style='border-bottom:1px solid black;'><tr>",
                 td($row->folder->name, $row->folder->title,
-                   $row->user->name, $row->user->full_name,
-                   $row->date ?
-                       ($row->date,"<a href='$link'>[check]</a>") : ());
-            println join "</tr><tr><td colspan=6></td>",
-                map { $link = form_url(
-                          ACTION_DOWNLOAD_FILE,1, FOLDERS, $row->folder->name,
-                          USERS, $row->user->name, START_DATE, $row->date, 
-                          END_DATE, $row->date, FILE, $_->name);
-                      "<td><a href='$link'>@{[$_->name]}</a></td>
-                       <td>@{[$_->size]}</td>" }
-                sort @{$row->files};
+                   $row->user->name, $row->user->full_name);
+            println $row->date ?
+                td($row->date,"<a href='$link'>[check]</a>") :
+                "<td colspan=2>(No submissions)</td>";
+            if (@{$row->files}) {
+                println join "</tr><tr><td colspan=6></td>",
+                    map { $link = form_url(
+                              ACTION_DOWNLOAD_FILE, 1,
+                              FOLDERS, $row->folder->name,
+                              USERS, $row->user->name, START_DATE, $row->date, 
+                              END_DATE, $row->date, FILE, $_->name);
+                          "<td><a href='$link'>@{[$_->name]}</a></td>
+                           <td align='right'>@{[$_->size]}</td>" }
+                    sort @{$row->files}
+            } else { println "<td colspan=2>(No files)</td>"; }
             println "</tr>";
             if ($check_folder and $row->date) {
+                my $check_num = 0;
                 my $len = @{$row->folder->checkers};
                 my $passed = 0;
-                for my $i (0..$len-1) {
-                    println "<tr><td colspan=1></td><td colspan=0>Running 
-                        @{[$row->folder->checkers->[$i]->[0]]}
-                        (check @{[$i+1]} of $len)</td></tr>
-                        <tr><td colspan=2></td><td colspan=0><div>";
-                    system @{$row->folder->checkers->[$i]->[1]}, join(
+                foreach my $checker (@{$row->folder->checkers}) {
+                    $check_num++;
+                    println "<tr><td colspan=1></td>
+                        <td colspan=7 style='background:#EEE;'>Running 
+                        @{[$checker->[0]]} (check $check_num of $len)</td></tr>
+                        <tr><td colspan=2></td><td colspan=6><div>";
+                    system @{$checker->[1]}, join(
                         '/', DIR, $folder_files, $row->folder->name,
                         $row->user->name, $row->date);
                     die if $? == -1; # TODO: error message (failed to exec)
                     $passed++ unless $?;
-                    println "</div></td><tr><tr><td colspan=2><td colspan=0>
+                    println "</div></td></tr><tr><td colspan=2></td><td colspan=7>
                         @{[$? ? 'Failed' : 'Passed']}</td></tr>";
                 }
-                println "<tr><td colspan=1></td><td colspan=0>
+                println "<tr><td colspan=1></td><td colspan=7 style='background:#EEE;'>
                     Passed $passed of $len checks</td></tr>";
             }
             println "</tbody>";
+            $row_num++;
         }
     }
     println "</table>";
@@ -377,31 +395,30 @@ sub folder_results {
     my @folders = list_folders(@folders);
 
     # Print
-    println $q->start_table({-border=>2});
+    println $q->h3({-style=>'border-bottom:2px solid black'}, "Upload files");
+    println "<center>No results to display. ",
+            "Browse or search to select folders.</center>" unless @folders;
     foreach my $folder (@folders) {
-        if (list_dates($folder->name, $remote_user) ? $submitted_yes
-                                                    : $submitted_no) {
-            println $q->h2("Upload new files to",
-                           $folder->name . ":", $folder->title);
-            println $q->h4("Due", $folder->due);
-            println $q->div($folder->text);
+        println $q->start_div(
+            {-style=>'width:100%; border-bottom:1px solid black;'});
+        println $q->h2(
+            $folder->title, "(".$folder->name.") - due", $folder->due);
+        println $q->div($folder->text);
 
-            println $q->start_form(-method=>'POST',
-                                   -action=>$global_config->cgi_url,
-                                   -enctype=>&CGI::MULTIPART);
-            println $q->hidden(-name=>FOLDERS, -value=>$folder->name,
-                               -override=>1);
-            for my $i (1..$folder->file_count) {
-                println $q->p(
-                    "File $i:", $q->filefield(-name=>FILE, -override=>1));
-            }
-            println $q->hidden(
-                -name=>ACTION_CHECK_FOLDER, -value=>1, -override=>1);
-            println $q->submit(ACTION_UPLOAD_FILES, "Upload files");
-            println $q->end_form();
+        println $q->start_form(-method=>'POST',
+                               -action=>$global_config->cgi_url,
+                               -enctype=>&CGI::MULTIPART);
+        println $q->hidden(-name=>FOLDERS, -value=>$folder->name,
+                           -override=>1);
+        for my $i (1..$folder->file_count) {
+            println $q->p(
+                "File $i:", $q->filefield(-name=>FILE, -override=>1));
         }
+        println $q->hidden(-name=>CHECK_FOLDERS, -value=>1, -override=>1);
+        println $q->p($q->submit(ACTION_UPLOAD_FILES, "Upload files"));
+        println $q->end_form();
+        println $q->end_div();
     }
-    println $q->end_table();
 }
 
 ################
