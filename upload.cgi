@@ -21,10 +21,9 @@ use Date::Manip;
 # * Critical
 #  - file_name regex (as validator)
 #  - config file validator
-# * Non-critical
-#  - groups (group submits) by symlinking assignment folders together
-#  - highlight incomplete submissions
+#  - active vs. non-active folders
 #  - Admin interface (but be clear what it looks like to student)
+# * Non-critical
 #  - hilight "overdue" in red or bold
 #  - Upload chmod for group?
 #  - HTML formatting / CSS classes
@@ -36,6 +35,7 @@ use Date::Manip;
 #  - Hilight sorted column
 #  - file size with commas
 # * Considering not adding
+#  - highlight incomplete submissions
 #  - Upload page? (link under browse)
 #  - Check box for show upload form
 # * Seriously Considering not adding
@@ -43,7 +43,10 @@ use Date::Manip;
 #  - detailed sort-by
 #  - Separate upload page (so full assignment can be listed)
 
-# NOTE: uploading multiple file w/ same name clobbers older files
+# NOTES:
+#  - uploading multiple file w/ same name clobbers older files
+#  - if you want to validate filenames, write an external checker
+#  - group work is possible if you symlink the right assignment folders together
 
 # File Paths
 use constant DIR => "/u-/adamsmd/projects/upload/demo";
@@ -158,11 +161,10 @@ my @folders = map { file $_ } $q->param(FOLDERS);
 
 sub println { print @_, "\n"; }
 
-error("No such user: $remote_user") unless
-    exists $global_config->users->{$remote_user};
-error("Access for '$remote_user' expired as of ",
-      user($remote_user)->expires, ".") unless
-    $now lt date(user($remote_user)->expires);
+error("No such user: $remote_user")
+    unless exists $global_config->users->{$remote_user};
+error("Access for '$remote_user' expired as of ", user($remote_user)->expires)
+    unless $now lt date(user($remote_user)->expires);
 
 if ($q->param(ACTION_DOWNLOAD_FILE)) { download(); }
 elsif ($q->param(ACTION_UPLOAD_FILES)) { upload(); }
@@ -172,7 +174,6 @@ else {
         -title=>$global_config->title,
         -style=>{-verbatim=>'td, th { vertical-align:top; text-align:left; }'});
     println $q->h1($global_config->title);
-    println $q->start_div();
 
     println $q->start_div(
         {-style=>'width:20em;float:left;border:solid black 1px;'});
@@ -185,7 +186,6 @@ else {
     folder_results();
     println $q->end_div();
 
-    println $q->end_div();
     println $q->end_html();
 }
 exit 0;
