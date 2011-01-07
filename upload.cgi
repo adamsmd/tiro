@@ -329,7 +329,7 @@ sub search_results {
     # Print and run checks
     # NOTE: Perl Idiom: @{[expr]} interpolates an arbitrary expr into a string
     println "<table style='width:100%;border-collapse: collapse;'>
-             <thead style='border-bottom:2px solid black';><tr>",
+             <thead style='border-bottom:2px solid black;'><tr>",
         th('Folder', 'Title', 'User', 'Name', 'Date', 'Check',
            'Files', 'Size (bytes)'), "</tr></thead>";
     if (not @rows) {
@@ -341,14 +341,14 @@ sub search_results {
             my $link = form_url(CHECK_FOLDERS, 1, FOLDERS, $row->folder->name,
                                 USERS, $row->user->name, START_DATE, $row->date,
                                 END_DATE, $row->date);
-            println "<tbody style='border-bottom:1px solid black;'><tr>",
-                td($row->folder->name, $row->folder->title,
-                   $row->user->name, $row->user->full_name);
-            println $row->date ?
-                td($row->date,"<a href='$link'>[check]</a>") :
-                "<td colspan=2>(No submissions)</td>";
+            println "<tbody style='border-bottom:1px solid black;'><tr>";
+            println map { "<td rowspan=@{[@{$row->files} or 1]}>$_</td>" }
+                $row->folder->name, $row->folder->title,
+                $row->user->name, $row->user->full_name,
+                ($row->date ? ($row->date,"<a href='$link'>[check]</a>")
+                            : ("(No submissions)", ""));
             if (@{$row->files}) {
-                println join "</tr><tr><td colspan=6></td>",
+                println join "</tr><tr>",
                     map { my $link = form_url(
                               ACTION_DOWNLOAD_FILE, 1,
                               FOLDERS, $row->folder->name,
@@ -360,7 +360,7 @@ sub search_results {
                           "<td><a href='$link'>$_</a></td>
                            <td style='text-align: right;'>$size</td>"
                     } @{$row->files};
-            } else { println "<td colspan=2>(No files)</td>"; }
+            } else { println td("(No files)", ""); }
             println "</tr>";
             if ($check_folder and $row->date) {
                 my $check_num = 0;
