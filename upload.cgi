@@ -24,6 +24,10 @@ use Date::Manip;
 #  - active vs. non-active folders
 #  - Admin interface (but be clear what it looks like to student)
 # * Non-critical
+#  - Server Time offset
+#  - Change "folder" to "assignment"
+#  - Change "browse" to "select"(?)
+#  - Print server time on pages
 #  - hilight "overdue" in red or bold
 #  - Upload chmod for group?
 #  - HTML formatting / CSS classes
@@ -241,7 +245,7 @@ sub upload {
 
 sub browse_folders {
     # Print
-    println $q->h3({-style=>'margin-top:0'}, "Browse"); # Stop spurious margin
+    println $q->h3({-style=>'margin-top:0'}, "Select Upload Folder"); # Stop spurious margin
     println $q->start_table();
     foreach my $folder (list_folders(@all_folders)) {
         println $q->Tr($q->td({colspan=>2},
@@ -261,7 +265,7 @@ sub browse_folders {
 
 sub search_form {
     # Print
-    println $q->h3("Search");
+    println $q->h3("... or Search for Uploads");
     println $q->start_form(-action=>$global_config->cgi_url, -method=>'GET');
     println $q->start_table();
     rows(["User:", $q->scrolling_list(
@@ -270,9 +274,10 @@ sub search_form {
          ["Folder:", $q->scrolling_list(
               -name=>FOLDERS, -style=>'width:100%;', -multiple=>1, -size=>3,
               -values=>\@all_folders, -default=>\@all_folders)],
-         ["Date start: ",
-          $q->textfield(-style=>'width:100%;', -name=>START_DATE)],
-         ["Date end: ", $q->textfield(-style=>'width:100%;', -name=>END_DATE)],
+         ["Start date: ", $q->textfield(
+              -style=>'width:100%;', -name=>START_DATE, -value=>'Any')],
+         ["End date: ", $q->textfield(
+              -style=>'width:100%;', -name=>END_DATE, -value=>'Any')],
          ["Only latest:", $q->checkbox(-name=>ONLY_LATEST, -label=>'')],
          ["Run checks:", $q->checkbox(-name=>CHECK_FOLDERS, -label=>'')],
          ["Status:", $q->scrolling_list(
