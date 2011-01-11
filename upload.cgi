@@ -255,7 +255,8 @@ sub upload {
     }
     print $q->redirect(-uri=>form_url(CHECK_FOLDERS, $q->param(CHECK_FOLDERS),
                                       FOLDERS, $folder, USERS, $remote_user,
-                                      START_DATE, $now, END_DATE, $now),
+                                      START_DATE, $now, END_DATE, $now,
+                                      ACTION_RESULTS, 1),
                        -status=>HTTP_SEE_OTHER);
 }
 
@@ -352,7 +353,7 @@ sub search_results {
         foreach my $row (@rows) {
             my $link = form_url(CHECK_FOLDERS, 1, FOLDERS, $row->folder->name,
                                 USERS, $row->user->name, START_DATE, $row->date,
-                                END_DATE, $row->date);
+                                END_DATE, $row->date, ACTION_RESULTS, 1);
             println "<tbody><tr>";
             println map { "<td rowspan=@{[@{$row->files} or 1]}>$_</td>" }
                 $row->folder->name, $row->folder->title,
