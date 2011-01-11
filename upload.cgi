@@ -74,6 +74,17 @@ use constant { DUE => 'due', DUE_PAST => 'past', DUE_FUTURE => 'future' };
 use constant { SORTING => 'sorting', SORTING_FOLDER => 'folder',
                SORTING_USER => 'user', SORTING_DATE => 'date' };
 use constant { FILE => 'file' };
+use constant { CSS => <<'EOT', NAVBAR => 'navbar', SEARCH_TABLE => 'search_table', RESULTS_TABLE => 'results_table', FOLDER_TABLE => 'folder_table' };
+td, th { vertical-align:top; text-align:left; }
+h2 { border-bottom:2px solid black; }
+h3:first-child { margin-top:0; } /* Stop spurious margin */
+.navbar { width:20em;float:left;border:solid black 1px; }
+.search_table tr td * { width:100%; }
+.results_table { width:100%;border-collapse: collapse; }
+.results_table thead { border-bottom:2px solid black; }
+.results_table tbody { border-bottom:1px solid black; }
+.folder_table { width:100%; border-bottom:1px solid black; }
+EOT
 
 # String formats
 sub trusted ($) { ($_[0] =~ /^(.*)$/s)[0]; }
@@ -177,17 +188,14 @@ if ($q->param(ACTION_DOWNLOAD)) { download(); }
 elsif ($q->param(ACTION_UPLOAD)) { upload(); }
 else {
     print $q->header();
-    println $q->start_html(
-        -title=>$global_config->title,
-        -style=>{-verbatim=>'td, th { vertical-align:top; text-align:left; }'});
+    println $q->start_html(-title=>$global_config->title,
+                           -style=>{-verbatim=>CSS});
     println $q->h1($global_config->title);
 
-    println $q->start_div(
-        {-style=>'width:20em;float:left;border:solid black 1px;'});
+    println $q->start_div({-class=>NAVBAR});
     browse_folders();
     println $q->h3("... or",
-                   $q->a({-href=>form_url(ACTION_SEARCH, 1)}, "Search"),
-                   "for Uploads");
+                   $q->a({-href=>form_url(ACTION_SEARCH, 1)}, "Search"));
     search_form() if $q->param(ACTION_SEARCH);
     println $q->end_div();
 
@@ -253,7 +261,7 @@ sub upload {
 
 sub browse_folders {
     # Print
-    println $q->h3({-style=>'margin-top:0'}, "Select Upload Folder"); # Stop spurious margin
+    println $q->h3("Select Folder");
     println $q->start_table();
     foreach my $folder (list_folders(@all_folders)) {
         println $q->Tr($q->td({colspan=>2},
@@ -274,35 +282,25 @@ sub browse_folders {
 sub search_form {
     # Print
     println $q->start_form(-action=>$global_config->cgi_url, -method=>'GET');
-    println $q->start_table();
+    println $q->start_table({-class=>SEARCH_TABLE});
     rows(["User:", $q->scrolling_list(
-              -name=>USERS, -style=>'width:100%;', -multiple=>1, -size=>3,
+              -name=>USERS, -multiple=>1, -size=>3,
               -values=>\@all_users, -default=>\@all_users)],
          ["Folder:", $q->scrolling_list(
-              -name=>FOLDERS, -style=>'width:100%;', -multiple=>1, -size=>3,
+              -name=>FOLDERS, -multiple=>1, -size=>3,
               -values=>\@all_folders, -default=>\@all_folders)],
-         ["Start date: ", $q->textfield(
-              -style=>'width:100%;', -name=>START_DATE, -value=>'Any')],
-         ["End date: ", $q->textfield(
-              -style=>'width:100%;', -name=>END_DATE, -value=>'Any')],
+         ["Start date: ", $q->textfield(-name=>START_DATE, -value=>'Any')],
+         ["End date: ", $q->textfield(-name=>END_DATE, -value=>'Any')],
          ["Only latest:", $q->checkbox(-name=>ONLY_LATEST, -label=>'')],
          ["Run checks:", $q->checkbox(-name=>CHECK_FOLDERS, -label=>'')],
-         ["Status:", $q->scrolling_list(
-              -name=>SUBMITTED, -style=>'width:100%;', -multiple=>1,
-              -values=>[SUBMITTED_YES, SUBMITTED_NO],
-              -default=>[SUBMITTED_YES, SUBMITTED_NO],
-              -labels=>{SUBMITTED_YES() => "Submitted",
-                        SUBMITTED_NO() => "Not Submitted"})],
-         ["Due:", $q->scrolling_list(
-              -name=>DUE, -style=>'width:100%;', -multiple=>1,
-              -values=>[DUE_PAST, DUE_FUTURE], -default=>[DUE_PAST, DUE_FUTURE],
-              -labels=>{DUE_PAST() => "Past", DUE_FUTURE() => "Future"})],
-         ["Sort by: ", $q->scrolling_list(
-              -name=>SORTING, -style=>'width:100%;',
-              -values=>[SORTING_FOLDER, SORTING_USER, SORTING_DATE],
-              -labels=>{SORTING_FOLDER() => "Folder",
-                        SORTING_USER() => "User",
-                        SORTING_DATE() => "Date"})],
+         ["Status:", multiple_list(SUBMITTED,
+                                   SUBMITTED_YES, "Submitted",
+                                   SUBMITTED_NO, "Not Submitted")],
+         ["Due:", multiple_list(DUE, DUE_PAST, "Past", DUE_FUTURE, "Future")],
+         ["Sort by: ", scrolling_list(SORTING, 1, [],
+                                      SORTING_FOLDER, "Folder",
+                                      SORTING_USER, "User",
+                                      SORTING_DATE, "Date")],
          ["", $q->submit(-value=>"Search")]);
     println $q->end_table();
     println $q->hidden(-name=>ACTION_SEARCH, -default=>1);
@@ -341,12 +339,11 @@ sub search_results {
                     ($a->date cmp $b->date)} @rows;
 
     # Print and run checks
-    println $q->h2({-style=>'border-bottom:2px solid black'}, "Previously uploaded");
+    println $q->h2("Previously uploaded files");
     # NOTE: Perl Idiom: @{[expr]} interpolates an arbitrary expr into a string
-    println "<table style='width:100%;border-collapse: collapse;'>
-             <thead style='border-bottom:2px solid black;'><tr>",
-        th('Folder', 'Title', 'User', 'Name', 'Date', 'Check',
-           'Files', 'Size (bytes)'), "</tr></thead>";
+    println "<table class='@{[RESULTS_TABLE]}'>";
+    println $q->thead($q->Tr($q->th(['Folder','Title','User','Name','Date',
+                                     'Check', 'Files','Size (bytes)'])));
     if (not @rows) {
         println "<tr><td colspan=8><center>No results to display. 
                  Browse or search to select folders.</center></td></tr>";
@@ -356,12 +353,12 @@ sub search_results {
             my $link = form_url(CHECK_FOLDERS, 1, FOLDERS, $row->folder->name,
                                 USERS, $row->user->name, START_DATE, $row->date,
                                 END_DATE, $row->date);
-            println "<tbody style='border-bottom:1px solid black;'><tr>";
+            println "<tbody><tr>";
             println map { "<td rowspan=@{[@{$row->files} or 1]}>$_</td>" }
                 $row->folder->name, $row->folder->title,
                 $row->user->name, $row->user->full_name,
                 ($row->date ? ($row->date,"<a href='$link'>[check]</a>")
-                            : ("(No submissions)", ""));
+                            : ("(No uploads)", ""));
             if (@{$row->files}) {
                 println join "</tr><tr>",
                     map { my $link = form_url(
@@ -374,7 +371,7 @@ sub search_results {
                           "<td><a href='$link'>$_</a></td>
                            <td style='text-align: right;'>$size</td>"
                     } @{$row->files};
-            } else { println td("(No files)", ""); }
+            } else { println $q->td("(No files)", ""); }
             println "</tr>";
             if ($check_folder and $row->date) {
                 my $check_num = 0;
@@ -409,24 +406,20 @@ sub folder_results {
     my @folders = list_folders(@folders);
 
     # Print
-    println $q->h2({-style=>'border-bottom:2px solid black'}, "Upload new files");
+    println $q->h2("Upload new files");
     println "<center>No results to display. ",
             "Browse or search to select folders.</center>" unless @folders;
     foreach my $folder (@folders) {
-        println $q->start_div(
-            {-style=>'width:100%; border-bottom:1px solid black;'});
-        println $q->h3(
-            $folder->title, "(".$folder->name.") - due", $folder->due);
+        println $q->start_div({-class=>FOLDER_TABLE});
+        println $q->h3($folder->title,"(".$folder->name.") - due",$folder->due);
         println $q->div($folder->text);
 
-        println $q->start_form(-method=>'POST',
-                               -action=>$global_config->cgi_url,
-                               -enctype=>&CGI::MULTIPART);
+        println $q->start_form(-method=>'POST', -enctype=>&CGI::MULTIPART,
+                               -action=>$global_config->cgi_url);
         println $q->hidden(-name=>FOLDERS, -value=>$folder->name,
                            -override=>1);
         for my $i (1..$folder->file_count) {
-            println $q->p(
-                "File $i:", $q->filefield(-name=>FILE, -override=>1));
+            println $q->p("File $i:", $q->filefield(-name=>FILE,-override=>1));
         }
         println $q->hidden(-name=>CHECK_FOLDERS, -value=>1, -override=>1);
         println $q->p($q->submit(ACTION_UPLOAD, "Upload files"));
@@ -465,15 +458,24 @@ sub list_dates {
 # Expects: ($key1, $val1, $key2, $val2)
 # Returns: $cgi_url?$key1&$val1&$key2&val2
 sub form_url {
-    my $str = $global_config->cgi_url;
-    for (my $i = 0; $i <= $#_; $i+=2) {
-        $str .= ($i == 0 ? "?" : "&") . $_[$i] . "=" . $_[$i+1];
-    }
-    return $str;
+    my %args = @_;
+    return $global_config->cgi_url . "?" .
+        join "&", map { $_ . "=" . $args{$_} } keys %args;
 }
 
-sub td { map { "<td>$_</td>" } @_; }
-sub th { map { "<th>$_</th>" } @_; }
+# Expects: (name, key, label, key, label)
+sub multiple_list {
+    my ($name, %args) = @_;
+    return scrolling_list($name, 1, [keys %args], %args);
+}
+
+sub scrolling_list {
+    my ($name, $multiple, $default, %args) = @_;
+    return $q->scrolling_list(
+        -name=>$name, -multiple=>$multiple,
+        -values => [keys %args], -default => $default, -labels => \%args);
+}
+
 sub row { return $q->Tr($q->td([@_])); }
 sub rows { $q->start_table(); map { println row(@$_) } @_; }
 
