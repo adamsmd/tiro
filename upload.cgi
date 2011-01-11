@@ -5,7 +5,7 @@ $|++; # Unbuffer stdout
 umask 0077; # Default to private files
 
 # Modules from Core
-use CGI qw/-private_tempfiles/;
+use CGI qw/-private_tempfiles -nosticky/;
 use Class::Struct;
 use File::Basename;
 use File::Copy; # copy() but move() has tainting issues
@@ -23,6 +23,9 @@ use Date::Manip;
 #  - config file validator
 #  - active vs. non-active folders
 #  - Admin interface (but be clear what it looks like to student)
+#
+#  - text/plain on file download (regex)
+#  - config "Select" and "Folder" text
 # * Non-critical
 #  - Server Time offset
 #  - Change "folder" to "assignment"
@@ -60,8 +63,8 @@ use constant GLOBAL_CONFIG_FILE => "global_config.json";
 # CGI Constants
 use constant HEADER_OCTET_STREAM => 'application/octet-stream';
 use constant HTTP_SEE_OTHER => 303;
-use constant { ACTION_DOWNLOAD_FILE => "download_file",
-               ACTION_UPLOAD_FILES => "upload_files" };
+use constant { ACTION_DOWNLOAD => "download", ACTION_UPLOAD => "upload",
+               ACTION_SEARCH => "search", ACTION_RESULTS => "results" };
 use constant { USERS => "users", FOLDERS => "folders",
                START_DATE => "start_date", END_DATE => "end_date",
                ONLY_LATEST => "only_latest", CHECK_FOLDERS => "check_folders" };
@@ -170,8 +173,8 @@ error("No such user: $remote_user")
 error("Access for '$remote_user' expired as of ", user($remote_user)->expires)
     unless $now lt date(user($remote_user)->expires);
 
-if ($q->param(ACTION_DOWNLOAD_FILE)) { download(); }
-elsif ($q->param(ACTION_UPLOAD_FILES)) { upload(); }
+if ($q->param(ACTION_DOWNLOAD)) { download(); }
+elsif ($q->param(ACTION_UPLOAD)) { upload(); }
 else {
     print $q->header();
     println $q->start_html(
@@ -182,13 +185,18 @@ else {
     println $q->start_div(
         {-style=>'width:20em;float:left;border:solid black 1px;'});
     browse_folders();
-    search_form();
+    println $q->h3("... or",
+                   $q->a({-href=>form_url(ACTION_SEARCH, 1)}, "Search"),
+                   "for Uploads");
+    search_form() if $q->param(ACTION_SEARCH);
     println $q->end_div();
 
-    println $q->start_div({-style=>'margin-left:21em'});
-    search_results();
-    folder_results();
-    println $q->end_div();
+    if ($q->param(ACTION_RESULTS)) {
+        println $q->start_div({-style=>'margin-left:21em'});
+        folder_results();
+        search_results();
+        println $q->end_div();
+    }
 
     println $q->end_html();
 }
@@ -249,7 +257,7 @@ sub browse_folders {
     println $q->start_table();
     foreach my $folder (list_folders(@all_folders)) {
         println $q->Tr($q->td({colspan=>2},
-                              $q->a({-href=>form_url(FOLDERS, $folder->name)},
+                              $q->a({-href=>form_url(FOLDERS, $folder->name, ACTION_RESULTS, 1)},
                                     $folder->name . ":", $folder->title)));
         my $submitted = grep { list_dates($folder->name, $_) } @all_users;
         my $num_users = @all_users;
@@ -265,7 +273,6 @@ sub browse_folders {
 
 sub search_form {
     # Print
-    println $q->h3("... or Search for Uploads");
     println $q->start_form(-action=>$global_config->cgi_url, -method=>'GET');
     println $q->start_table();
     rows(["User:", $q->scrolling_list(
@@ -298,6 +305,8 @@ sub search_form {
                         SORTING_DATE() => "Date"})],
          ["", $q->submit(-value=>"Search")]);
     println $q->end_table();
+    println $q->hidden(-name=>ACTION_SEARCH, -default=>1);
+    println $q->hidden(-name=>ACTION_RESULTS, -default=>1);
     println $q->end_form();
 }
 
@@ -332,6 +341,7 @@ sub search_results {
                     ($a->date cmp $b->date)} @rows;
 
     # Print and run checks
+    println $q->h2({-style=>'border-bottom:2px solid black'}, "Previously uploaded");
     # NOTE: Perl Idiom: @{[expr]} interpolates an arbitrary expr into a string
     println "<table style='width:100%;border-collapse: collapse;'>
              <thead style='border-bottom:2px solid black;'><tr>",
@@ -355,8 +365,7 @@ sub search_results {
             if (@{$row->files}) {
                 println join "</tr><tr>",
                     map { my $link = form_url(
-                              ACTION_DOWNLOAD_FILE, 1,
-                              FOLDERS, $row->folder->name,
+                              ACTION_DOWNLOAD, 1, FOLDERS, $row->folder->name,
                               USERS, $row->user->name, START_DATE, $row->date, 
                               END_DATE, $row->date, FILE, $_);
                           my $size = -s join(
@@ -400,13 +409,13 @@ sub folder_results {
     my @folders = list_folders(@folders);
 
     # Print
-    println $q->h3({-style=>'border-bottom:2px solid black'}, "Upload files");
+    println $q->h2({-style=>'border-bottom:2px solid black'}, "Upload new files");
     println "<center>No results to display. ",
             "Browse or search to select folders.</center>" unless @folders;
     foreach my $folder (@folders) {
         println $q->start_div(
             {-style=>'width:100%; border-bottom:1px solid black;'});
-        println $q->h2(
+        println $q->h3(
             $folder->title, "(".$folder->name.") - due", $folder->due);
         println $q->div($folder->text);
 
@@ -420,7 +429,7 @@ sub folder_results {
                 "File $i:", $q->filefield(-name=>FILE, -override=>1));
         }
         println $q->hidden(-name=>CHECK_FOLDERS, -value=>1, -override=>1);
-        println $q->p($q->submit(ACTION_UPLOAD_FILES, "Upload files"));
+        println $q->p($q->submit(ACTION_UPLOAD, "Upload files"));
         println $q->end_form();
         println $q->end_div();
     }
