@@ -19,9 +19,9 @@ use JSON;
 use Date::Manip;
 use List::MoreUtils qw/pairwise true uniq/;
 
-########################
+################
 # Static Definitions
-########################
+################
 
 # File Paths
 use constant DIR => "/u-/adamsmd/projects/upload/demo"; # Root of all paths
@@ -48,14 +48,14 @@ td { vertical-align:top; }
 h2 { border-bottom:2px solid black; }
 .navbar > h3:first-child { margin-top:0; } /* Stop spurious margin */
 .navbar { padding:0.3em; width:20em;float:left;border:solid black 1px; }
-.search tr td * { width:100%; }
+.search TR td * { width:100%; }
 .results { width:100%;border-collapse: collapse; }
 .results thead { border-bottom:2px solid black; }
 .results tbody { border-bottom:1px solid black; }
-.results tbody tr:first-child td+td+td+td+td+td+td+td { text-align:right; }
-.results tbody tr+tr td+td { text-align:right; }
-.results tbody tr+tr td+td[colspan] { text-align:left; }
-.results tbody tr td[colspan="1"]+td { background:#EEE; }
+.results tbody TR:first-child td+td+td+td+td+td+td+td { text-align:right; }
+.results tbody TR+TR td+td { text-align:right; }
+.results tbody TR+TR td+td[colspan] { text-align:left; }
+.results tbody TR td[colspan="1"]+td { background:#EEE; }
 .folder { width:100%; border-bottom:1px solid black; }
 .body { margin-left:22em; }
 EOT
