@@ -24,6 +24,7 @@ use Date::Manip;
 #  - active vs. non-active folders
 #  - Admin interface (but be clear what it looks like to student)
 #
+#  - Report back search params
 #  - text/plain on file download (regex)
 #  - config "Select" and "Folder" text
 # * Non-critical
@@ -41,9 +42,9 @@ use Date::Manip;
 #  - Folder edit: link under browse?, new (link under browse), delete, active, rename, validate config
 #  - Hilight sorted column
 #  - file size with commas
+#
 #  - List of testing people
 #  - Put "multiselect" under Users and Folders search box
-#  - h3 CSS is broken
 # * Considering not adding
 #  - highlight incomplete submissions
 #  - Upload page? (link under browse)
@@ -90,9 +91,11 @@ h2 { border-bottom:2px solid black; }
 .results tbody { border-bottom:1px solid black; }
 .results tbody tr:first-child td+td+td+td+td+td+td+td { text-align:right; }
 .results tbody tr+tr td+td { text-align:right; }
+.results tbody tr+tr td+td[colspan] { text-align:left; }
+.results tbody tr td[colspan="1"]+td { background:#EEE; }
 .folder { width:100%; border-bottom:1px solid black; }
 .body { margin-left:22em; }
-.graybg { background:#EEE; }
+#.graybg { background:#EEE; }
 EOT
 
 # String formats
@@ -236,7 +239,7 @@ sub error {
 sub download {
     my $folder = $folders[0] or error "No folder selected.";
     my $user = $users[0] or error "No user selected.";
-    my $filename = join('/',DIR,$folder_files,$folder,$user,$start_date,$file);
+    my $filename = filename($folder,$user,$start_date,$file);
     -f $filename and -r $filename or
         error "Can't read '$folder,$user,$start_date,$file'";
     print $q->header(-type=>HEADER_OCTET_STREAM,
@@ -253,7 +256,7 @@ sub upload {
         $names{$name} = 1;
     }
 
-    my $target_dir = join('/', DIR, $folder_files,$folder,$remote_user,$now);
+    my $target_dir = filename($folder,$remote_user,$now);
     mkpath($target_dir) or
         error "Can't create folder '$folder,$remote_user,$now' for upload: $!";
     foreach my $file ($q->upload(FILE)) {
@@ -275,15 +278,16 @@ sub browse_folders {
     say $q->start_table();
     foreach my $folder (list_folders(@all_folders)) {
         say $q->Tr($q->td({colspan=>2},
-                              $q->a({-href=>form_url(FOLDERS, $folder->name, DO_RESULTS, 1)},
-                                    $folder->name . ":", $folder->title)));
+                          $q->a({-href=>form_url(
+                                      FOLDERS, $folder->name, DO_RESULTS, 1)},
+                                $folder->name . ":", $folder->title)));
         my $submitted = grep { list_dates($folder->name, $_) } @all_users;
         my $num_users = @all_users;
         say row(
             $q->small("&nbsp;&nbsp;Due " . $folder->due),
             $q->small($submitted ?
                       (" - Submitted" .
-                       ($#all_users == 0 ? "" : " ($submitted/$num_users)")) :
+                       ($is_admin ? " ($submitted/$num_users)" : "")) :
                       ($now ge $folder->due ? " - Overdue" : "")));
     }
     say $q->end_table();
@@ -326,7 +330,7 @@ sub search_results {
             my @dates = list_dates($folder->name, $user->name);
             if (@dates) {
                 if ($submitted_yes) {
-                    foreach my $date (@dates) { # TODO: or none exist
+                    foreach my $date (@dates) {
                         push @rows, Row->new(
                             folder=>$folder, user=>$user, date=>$date,
                             files=>[dir_list($folder_files, $folder->name,
@@ -334,9 +338,8 @@ sub search_results {
                     }
                 }
             } else {
-                if ($submitted_no) {
-                    push @rows, Row->new(folder=>$folder, user=>$user, date=>'', files=>[]);
-                }
+                push @rows, Row->new(folder=>$folder, user=>$user, date=>'',
+                                     files=>[]) if $submitted_no;
             }
         }
     }
@@ -350,95 +353,47 @@ sub search_results {
     # Print and run checks
     say $q->h2("Previously uploaded files");
     # NOTE: Perl Idiom: @{[expr]} interpolates an arbitrary expr into a string
-    say "<table class='@{[RESULTS]}'>";
+    say $q->start_table({-class=>RESULTS});
     say $q->thead($q->Tr($q->th(['Folder','Title','User','Name','Date',
-                                     'Check', 'Files','Size (bytes)'])));
+                                 'Check', 'Files','Size (bytes)'])));
     if (not @rows) {
         say "<tr><td colspan=8><center>No results to display. 
                  Browse or search to select folders.</center></td></tr>";
     } else {
-        my $row_num = 0;
         foreach my $row (@rows) {
-            my $link = form_url(CHECK_FOLDERS, 1, FOLDERS, $row->folder->name,
-                                USERS, $row->user->name, START_DATE, $row->date,
-                                END_DATE, $row->date, DO_RESULTS, 1);
             say "<tbody>";
-
-
-#    my ([row_data ...], [cell,cell],[cell,cell] ...);
-#    my @rows = ["(No files)", ""] unless @rows;
-#    my $len = @rows;
-            say multirow(
-                [$row->folder->name, $row->folder->title,
-                 $row->user->name, $row->user->full_name,
-                 ($row->date ? ($row->date,"<a href='$link'>[check]</a>")
-                  : ("(No uploads)", ""))],
-                ((not @{$row->files}) ?
+            my @file_rows = (not @{$row->files}) ?
                 (["(No files)", ""]) :
-                (map { my $link = form_url(
-                           DO_DOWNLOAD, 1, FOLDERS, $row->folder->name,
-                           USERS, $row->user->name, START_DATE, $row->date, 
-                           END_DATE, $row->date, FILE, $_);
-                       my $size = -s join(
-                           '/', DIR, $folder_files, $row->folder->name,
-                           $row->user->name, $row->date, $_);
-                       ["<a href='$link'>$_</a>", $size];
-                 } @{$row->files})));
+                map { my $link = row_url($row, DO_DOWNLOAD, 1, FILE, $_);
+                      my $size = -s filename(
+                          $row->folder->name, $row->user->name, $row->date, $_);
+                      ["<a href='$link'>$_</a>", $size];
+            } @{$row->files};
+            my $link = row_url($row, CHECK_FOLDERS, 1, DO_RESULTS, 1);
+            say mrow([$row->folder->name, $row->folder->title,
+                      $row->user->name, $row->user->full_name,
+                      ($row->date ? ($row->date,"<a href='$link'>[check]</a>")
+                       : ("(No uploads)", ""))], @file_rows);
 
- 
-
-#            say "<tr>";
-#            say map { "<td rowspan=@{[@{$row->files} or 1]}>$_</td>" }
-#                $row->folder->name, $row->folder->title,
-#                $row->user->name, $row->user->full_name,
-#                ($row->date ? ($row->date,"<a href='$link'>[check]</a>")
-#                            : ("(No uploads)", ""));
-#            if (@{$row->files}) {
-#                say join "</tr><tr>",
-#                    map { my $link = form_url(
-#                              DO_DOWNLOAD, 1, FOLDERS, $row->folder->name,
-#                              USERS, $row->user->name, START_DATE, $row->date, 
-#                              END_DATE, $row->date, FILE, $_);
-#                          my $size = -s join(
-#                              '/', DIR, $folder_files, $row->folder->name,
-#                              $row->user->name, $row->date, $_);
-#                          "<td><a href='$link'>$_</a></td>
-#                           <td>$size</td>"
-#                    } @{$row->files};
-#            } else { say $q->td("(No files)", ""); }
-#            say "</tr>";
             if ($check_folder and $row->date) {
-                my $check_num = 0;
                 my $len = @{$row->folder->checkers};
-                my $passed = 0;
-                foreach my $checker (@{$row->folder->checkers}) {
-                    $check_num++;
-                    say "<tr><td colspan=1></td>
-                        <td colspan=7 class='graybg'>Running 
-                        @{[$checker->[0]]} (check $check_num of $len)</td></tr>
-                        <tr><td colspan=2></td><td colspan=6><div>";
-                    system @{$checker->[1]}, join(
-                        '/', DIR, $folder_files, $row->folder->name,
-                        $row->user->name, $row->date);
-                    die if $? == -1; # TODO: error message (failed to exec)
-                    $passed++ unless $?;
-                    say "</div></td></tr><tr><td colspan=2></td><td colspan=7>
-                        @{[$? ? 'Failed' : 'Passed']}</td></tr>";
-                }
-                say "<tr><td colspan=1></td><td colspan=7 class='graybg'>
-                    Passed $passed of $len checks</td></tr>";
+                my $passed = index_grep(
+                    sub { my ($num, $checker) = @_;
+                          say indentrow(1, 8, "Running @{[$checker->[0]]} 
+                                               (check $num of $len)");
+                          say start_indentrow(2, 8), $q->start_div();
+                          system @{$checker->[1]}, filename(
+                              $row->folder->name, $row->user->name, $row->date);
+                          die $! if $? == -1;
+                          say $q->end_div(), end_indentrow();
+                          say indentrow(2, 8, $? ? 'Failed' : 'Passed');
+                          $? }, @{$row->folder->checkers});
+                say indentrow(1, 8, "Passed $passed of $len checks");
             }
             say "</tbody>";
-            $row_num++;
         }
     }
-    say "</table>";
-}
-
-sub multirow {
-    my ($prefix, @rows) = @_;
-    return "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
-        join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>";
+    say $q->end_table();
 }
 
 sub folder_results {
@@ -456,12 +411,11 @@ sub folder_results {
 
         say $q->start_form(-method=>'POST', -enctype=>&CGI::MULTIPART,
                                -action=>$global_config->cgi_url);
-        say $q->hidden(-name=>FOLDERS, -value=>$folder->name,
-                           -override=>1);
-        for my $i (1..$folder->file_count) {
-            say $q->p("File $i:", $q->filefield(-name=>FILE,-override=>1));
-        }
+        say $q->hidden(-name=>FOLDERS, -value=>$folder->name, -override=>1);
         say $q->hidden(-name=>CHECK_FOLDERS, -value=>1, -override=>1);
+        for my $i (1..$folder->file_count) {
+            say $q->p("File $i:", $q->filefield(-name=>FILE, -override=>1));
+        }
         say $q->p($q->submit(DO_UPLOAD, "Upload files"));
         say $q->end_form();
         say $q->end_div();
@@ -477,18 +431,17 @@ sub folder {
 sub list_folders { map { folder $_ } @_; }
 sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
 sub list_users { map { user $_ } @users; }
-
 sub list_dates {
     my ($folder, $user) = @_;
-    my $dir = join('/', $folder_files, $folder, $user);
-    my @dates = dir_list($dir);
+    my @dates = dir_list($folder_files, $folder, $user);
     @dates = map { date $_ } @dates;
-    @dates = grep { -d (DIR . "/$dir/$_") } @dates;
+    @dates = grep { -d filename($folder, $user, $_) } @dates;
     @dates = grep {$start_date le $_} @dates if $start_date;
     @dates = grep {$end_date ge $_} @dates if $end_date;
     @dates = ($dates[$#dates]) if $#dates != -1 and $only_latest;    
     return @dates;
 }
+sub filename { join('/', DIR, $folder_files, @_); }
 
 ################
 # CGI Utility
@@ -500,6 +453,11 @@ sub form_url {
     my %args = @_;
     return $global_config->cgi_url . "?" .
         join "&", map { $_ . "=" . $args{$_} } keys %args;
+}
+
+sub row_url {
+    form_url(FOLDERS, $_[0]->folder->name, USERS, $_[0]->user->name,
+             START_DATE, $_[0]->date, END_DATE, $_[0]->date, @_);
 }
 
 # Expects: (name, key, label, key, label)
@@ -518,6 +476,23 @@ sub scrolling_list {
 sub row { return $q->Tr($q->td([@_])); }
 sub rows { $q->start_table(); map { say row(@$_) } @_; }
 
+sub indentrow {
+    my ($indent, $length, $data) = @_;
+    start_indentrow($indent, $length) . $data . end_indentrow();
+}
+
+sub start_indentrow {
+    my ($indent, $length) = @_;
+    "<tr><td colspan=$indent></td><td colspan=@{[$length-$indent]}>";
+}
+sub end_indentrow { "</td></tr>" }
+
+sub mrow {
+    my ($prefix, @rows) = @_;
+    return "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
+        join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>";
+}
+
 ################
 # General Util
 ################
@@ -526,6 +501,11 @@ sub member {
     my ($value, $default, @list) = @_;
     return $default unless @list;
     return (grep { $_ eq $value } @list) ? 1 : 0;
+}
+
+sub index_grep {
+    my ($num, $true, $fun, @items) = (0, 0, @_);
+    foreach my $item (@items) { $num++; &$fun($num, $item); }
 }
 
 sub read_config {
