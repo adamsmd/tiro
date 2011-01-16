@@ -14,6 +14,9 @@ Future features:
  - config "Select" and "Folder" text
    - Change "folder" to "assignment"
    - Change "browse" to "select"(?)
+ - checkers with folder name in the middle
+ - BUG: browse depends on start_date
+ - BUG: boxes hash reorders (we need to make it stop)
 
 * Non-critical
  - Print server time on pages
