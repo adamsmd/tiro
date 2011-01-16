@@ -1,7 +1,6 @@
 
 Future features:
 * Critical
- - Perl version detection for "say"
  - Install guide
  - file_name regex (as validator)
  - config file validator
@@ -15,18 +14,11 @@ Future features:
    - Change "folder" to "assignment"
    - Change "browse" to "select"(?)
  - checkers with folder name in the middle
- - BUG: browse depends on start_date
- - BUG: boxes hash reorders (we need to make it stop)
+ + folder extension
 
 * Non-critical
- - Print server time on pages
  - hilight "overdue" in red or bold
- - Upload chmod for group? (as silent validator?)
- - HTML formatting / CSS classes
  - Download tar-ball.
- - Use path_info() to dispatch upload, download and pre-upload(?)
- - Full URL to cgi.cs.indiana.edu? url()
- - struct for checker names?
  - Folder edit: link under browse?, new (link under browse), delete, active, rename, validate config
  - Hilight sorted column
  - Clickable sorted column
@@ -43,6 +35,7 @@ Future features:
 NOTES:
  - if you want to validate filenames, write an external checker
  - group work is possible if you symlink the right assignment folders together
+ - Upload chmod for group? (as silent validator?)
 
 Thanks to the testers:
   TODO

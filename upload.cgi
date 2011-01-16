@@ -10,7 +10,7 @@ use Class::Struct;
 use File::Copy; # copy() but move() has tainting issues
 use File::Path qw/mkpath/;
 use DirHandle;
-sub say { print @_, "\n"; } # Emulate Perl 5.10 feature
+sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 # Modules not from Core
 use JSON;
@@ -19,7 +19,7 @@ use File::Slurp qw(slurp); # Perl 6 feature
 use List::MoreUtils ':all';
 
 ################
-# Static Definitions
+# Static Defs
 ################
 
 # File Paths
@@ -27,8 +27,9 @@ use constant DIR => "/u-/adamsmd/projects/upload/demo"; # Root of all paths
 use constant GLOBAL_CONFIG_FILE => "global_config.json";
 
 # Structs
-struct GlobalConfig=>{title=>'$', folder_configs=>'$', folder_files=>'$',
-                      path=>'$', post_max=>'$', admins=>'*@', users=>'*%'};
+struct GlobalConfig=>{
+    title=>'$', folder_configs=>'$', folder_files=>'$', folder_regex=>'$',
+    path=>'$', post_max=>'$', admins=>'*@', users=>'*%'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct FolderConfig=>{name=>'$', num_submitted =>'$',title=>'$', text=>'$',
                       due=>'$', file_count=>'$', checkers=>'@'};
@@ -39,9 +40,9 @@ struct FileInfo=>{name=>'$', size=>'$'};
 # Bootstrap
 ################
 
-my $global_config = GlobalConfig->new(read_config(GLOBAL_CONFIG_FILE));
+my $global_config = GlobalConfig->new(slurp_json(GLOBAL_CONFIG_FILE));
 $CGI::POST_MAX = $global_config->post_max;
-($ENV{PATH}) = $global_config->path;
+$ENV{PATH} = $global_config->path;
 my $q = CGI->new;
 die $q->cgi_error() if $q->cgi_error();
 
@@ -54,23 +55,22 @@ sub trusted ($) { ($_[0] =~ /^(.*)$/s)[0]; }
 sub date ($) { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
 sub file ($) { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
 sub bool ($) { $_[0] ? 1 : 0; }
+sub search_bool ($) { (not from_search() or $_[0]) ? 1 : 0; }
 
-sub param (%) {
-    my (%hash) = @_;
-    for (keys %hash) {
-        eval "sub $_ () { '@{[$hash{$_}->($q->param($_))]}' }";
-        eval "sub @{[uc $_]} () { '$_' }";
-    }
-}
+sub param (%) { my (%hash) = @_;
+                for (keys %hash) {
+                    eval "sub $_ () { '@{[$hash{$_}->($q->param($_))]}' }";
+                    eval "sub @{[uc $_]} () { '$_' }";
+                } }
 
 # Basic Inputs
 my $now = date "now";
 param(start_date => \&date, end_date => \&date);
-param(do_search => \&bool, do_download => \&bool,
-      do_upload => \&bool, do_results => \&bool);
+param(do_search => \&bool, from_search => \&bool,
+      do_download => \&bool, do_upload => \&bool, do_results => \&bool);
 param(only_latest => \&bool, do_checks => \&bool);
-param(submitted_yes => \&bool, submitted_no => \&bool);
-param(due_past => \&bool, due_future => \&bool);
+param(submitted_yes => \&search_bool, submitted_no => \&search_bool);
+param(due_past => \&search_bool, due_future => \&search_bool);
 param(sort_by => \&file);
 use constant { SORT_FOLDER=>'folder', SORT_USER=>'user', SORT_DATE=>'date' };
 
@@ -78,38 +78,25 @@ use constant { SORT_FOLDER=>'folder', SORT_USER=>'user', SORT_DATE=>'date' };
 my $folder_configs = file $global_config->folder_configs;
 my $folder_files = file $global_config->folder_files;
 
-use constant {USERS => "users", FOLDERS => "folders",  FILE => 'file' };
 my $remote_user = file $q->remote_user();
 $remote_user="user1"; # HACK
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
+use constant {USERS => "users", FOLDERS => "folders",  FILE => 'file' };
 my @all_users = $is_admin ? sort keys %{$global_config->users} : ($remote_user);
-my @users = $q->param(USERS) ? $q->param(USERS) : @all_users;
-@users = sort (intersect(\@all_users, [map { file $_ } @users]));
+@all_users = map { user($_) } @all_users;
+my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
+@users = intersect_key(\@all_users, sub {$_[0]->name}, \@users);
+
+my @all_folders = map { folder(file $_) }
+  map { /@{[$global_config->folder_regex]}/ } dir_list($folder_configs);
+my @folders = map { file $_ } $q->param(FOLDERS);
+@folders = intersect_key(\@all_folders, sub {$_[0]->name}, \@folders);
+@folders = grep { due_past() and $_->due le $now or
+                      due_future() and $_->due gt $now} @folders;
 
 my $file = file $q->param(FILE);
 my @files = $q->upload(FILE);
-
-my @all_folders = dir_list($global_config->folder_configs);
-my @folders = map { file $_ } $q->param(FOLDERS);
-@folders = sort (intersect(\@all_folders, \@folders));
-@folders = map { $_->name }
-    grep { due_past() and $_->due le $now or due_future() and $_->due gt $now}
-    list_folders(@folders);
-
-# Other inputs
-#  - the file being uploaded
-#  dir_list: list_dates list_files
-#  config:
-#   Printing only:
-#    GLOBAL_TITLE
-#    FOLDER_NAME FOLDER_TITLE FOLDER_TEXT
-#    USER_FULL_NAME
-#   Processed:
-#    GLOBAL_USERS (@all_users)
-#    FOLDER_CHECKERS (check_folder as a system command)
-#    FOLDER_DUE (folder_results to flag code)
-#    FOLDER_FILE_COUNT (folder_results as a loop bound)
 
 ################
 # Main Code
@@ -122,10 +109,7 @@ error("Access for $remote_user expired as of ", user($remote_user)->expires)
 
 if (do_download()) { download(); }
 elsif (do_upload()) { upload(); }
-else {
-    render([list_folders(@all_folders)], [list_folders(@folders)],
-           [search_results()]); # NOTE: search_results does the non-render work
-}
+else { render(search_results()); }
 exit 0;
 
 ################
@@ -142,10 +126,12 @@ sub error {
 }
 
 sub download {
-    my ($folder, $user) = ($folders[0], $users[0]);
+    @folders and @users and start_date() and $file or
+        error ("Bad download request\n");
+    my ($folder, $user) = ($folders[0]->name, $users[0]->name);
     my $path = filename($folder,$user,start_date(),$file);
-    $folder and $user and start_date() and $file and -f $path and -r $path or
-        error("Can't read '$folder,$user,@{[start_date()]},$file'");
+    -f $path and -r $path or
+        error("Can't read $file in $folder for $user at @{[start_date()]}");
     print $q->header(-type=>'application/octet-stream',
                      -attachment=>$file, -Content_length=>-s $path);
     copy($path, *STDOUT) or die $!;
@@ -157,7 +143,8 @@ sub upload {
     my $folder = $folders[0] or error("No folder selected for upload.");
 
     my $target_dir = filename($folder,$remote_user,$now);
-    mkpath($target_dir) or error("Can't create: $folder,$remote_user,$now: $!");
+    mkpath($target_dir) or
+        error("Can't mkdir in $folder for $remote_user at $now: $!");
     foreach my $file (@files) {
         my $name = file $file;
         copy($file, "$target_dir/$name") or
@@ -171,16 +158,15 @@ sub upload {
 
 sub search_results {
     my @rows;
-    foreach my $folder (list_folders(@folders)) {
-        foreach my $user (list_users($folder->name)) {
+    foreach my $folder (@folders) {
+        foreach my $user (@users) {
             my @dates = list_dates($folder->name, $user->name);
             push @rows, Row->new(folder=>$folder, user=>$user, date=>'',
                                  files=>[]) if submitted_no() and not @dates;
-            foreach my $date (@dates) {
-                push @rows, Row->new(
-                    folder=>$folder, user=>$user, date=>$date,
-                    files=>[list_files($folder, $user, $date)])
-                    if (submitted_yes());
+            foreach (@dates) {
+                push @rows, Row->new(folder=>$folder, user=>$user, date=>$_,
+                                     files=>[list_files($folder, $user, $_)])
+                    if submitted_yes();
             }
         }
     }
@@ -192,12 +178,8 @@ sub search_results {
                      or ($a->date cmp $b->date) } @rows;
 }
 
-################
-# Rendering
-################
-
 sub render {
-    my ($all_folders, $folders, $rows) = @_;
+    my (@rows) = @_;
 
     print $q->header();
     say $q->start_html(-title=>$global_config->title,
@@ -217,16 +199,16 @@ h2 { border-bottom:2px solid black; }
 .results tbody TR td[colspan="1"]+td { background:#EEE; }
 .folder { width:100%; border-bottom:1px solid black; }
 .body { margin-left:22em; }
+.body table+p { text-align:right; font-size: small; }
 EOT
 
     say $q->h1($global_config->title);
 
     say $q->start_div({-class=>'navbar'});
 
-    ## Browse folders
     say $q->h3("Select Folder");
     say $q->start_table();
-    foreach my $folder (@$all_folders) {
+    foreach my $folder (@all_folders) {
         say row(0, 2, href(form_url(DO_RESULTS(), 1, FOLDERS, $folder->name),
                            $folder->name . ":", $folder->title));
         my $num_submitted = $folder->num_submitted;
@@ -240,21 +222,23 @@ EOT
     say $q->end_table();
 
     say $q->h3("... or", href(form_url(DO_SEARCH(), 1), "Search"));
-    ## Search folders
     if (do_search()) {
         say $q->start_form(-action=>'#', -method=>'GET');
         say $q->start_table({-class=>'search'});
+        say $q->hidden(-name=>DO_SEARCH(), -default=>1);
+        say $q->hidden(-name=>DO_RESULTS(), -default=>1);
+        say $q->hidden(-name=>FROM_SEARCH(), -default=>1);
         map { say row(0, 1, @$_) } (
-            ["User:", multilist(USERS, @all_users)],
-            ["Folder:", multilist(FOLDERS, @all_folders)],
+            ["User:", multilist(USERS, map {$_->name} @all_users)],
+            ["Folder:", multilist(FOLDERS, map {$_->name} @all_folders)],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
-            ["Only latest:", $q->checkbox(-name=>ONLY_LATEST(), -label=>'')],
             ["Run checks:", $q->checkbox(-name=>DO_CHECKS(), -label=>'')],
-            ["Status:", boxes(SUBMITTED_YES(), 'Has been Submitted',
-                              SUBMITTED_NO(), 'Hasn\'t been Submitted')],
-            ["Due:", boxes(DUE_PAST(), 'Due in the Past',
-                           DUE_FUTURE(), 'Due in the Future')],
+            ["Show:", boxes(SUBMITTED_YES(), submitted_yes(), 'Submitted',
+                            SUBMITTED_NO(), submitted_no(), 'Unsubmitted',
+                            DUE_PAST(), due_past(), 'Due in the Past',
+                            DUE_FUTURE(), due_future(), 'Due in the Future',
+                            ONLY_LATEST(), only_latest(), 'Only Most Recent')],
             ["Sort by: ",
              scalar($q->radio_group(
                         -name=>SORT_BY(), -default=>[SORT_FOLDER],
@@ -264,8 +248,6 @@ EOT
                                   SORT_DATE, "Date"}))],
             ["", $q->submit(-value=>"Search")]);
         say $q->end_table();
-        say $q->hidden(-name=>DO_SEARCH(), -default=>1);
-        say $q->hidden(-name=>DO_RESULTS(), -default=>1);
         say $q->end_form();
     }
     say $q->end_div();
@@ -276,8 +258,8 @@ EOT
 
         my @no_results = ('No results to display.',
                           'Browse or search to select folders.');
-        say $q->center(@no_results) unless @$folders;
-        foreach my $folder (@$folders) {
+        say $q->center(@no_results) unless @folders;
+        foreach my $folder (@folders) {
             say $q->start_div({-class=>'folder'});
             say $q->h3($folder->title,"(".$folder->name.") - due",$folder->due);
             say $q->div($folder->text);
@@ -298,16 +280,16 @@ EOT
         say $q->start_table({-class=>'results'});
         say $q->thead($q->Tr($q->th(['Folder','Title','User','Name','Date',
                                      'Check', 'Files','Size (bytes)'])));
-        if (not @$rows) { say row(0, 8, $q->center(@no_results)); }
+        if (not @rows) { say row(0, 8, $q->center(@no_results)); }
         else {
-            foreach my $row (@$rows) {
+            foreach my $row (@rows) {
                 say $q->start_tbody();
                 my @url = (FOLDERS, $row->folder->name, USERS, $row->user->name,
                            START_DATE(), $row->date, END_DATE(), $row->date);
                 my @file_rows = @{$row->files} ?
-                    map { [href(form_url(@url, DO_DOWNLOAD(), 1, FILE, $_->name),
-                                $_->name),
-                           $_->size] } @{$row->files} : ["(No files)", ""];
+                    map {[href(form_url(@url, DO_DOWNLOAD(), 1, FILE, $_->name),
+                               $_->name),
+                          $_->size] } @{$row->files} : ["(No files)", ""];
                 my $check = form_url(@url, DO_CHECKS(), 1, DO_RESULTS(), 1);
                 say multirow([$row->folder->name, $row->folder->title,
                               $row->user->name, $row->user->full_name,
@@ -323,7 +305,7 @@ EOT
                     { say row(1, 7, "Running @{[$b->[0]]} (check $a of $len)");
                       say $q->start_Tr(), $q->td({-colspan=>2}, "");
                       say $q->start_td({-colspan=>6}), $q->start_div();
-                      system @{$b->[1]}, filename(
+                      system @$b[1..$#$b], filename(
                           $row->folder->name, $row->user->name, $row->date);
                       die $! if $? == -1;
                       say $q->end_div(), $q->end_td(), $q->end_Tr();
@@ -335,6 +317,8 @@ EOT
             }
         }
         say $q->end_table();
+
+        say $q->p("Produced by upload.cgi at $now");
         say $q->end_div();
     }
     say $q->end_html();
@@ -344,30 +328,26 @@ EOT
 # Listings
 ################
 
-sub list_files {
-    my ($folder, $user, $date) = @_;
-    map { FileInfo->new(
-              name => $_,
-              size => -s filename($folder->name,$user->name,$date,$_)) }
-    dir_list($folder_files, $folder->name, $user->name, $date);
-}
 sub folder {
     FolderConfig->new(
-        name => $_[0], read_config($folder_configs, $_[0]),
-        num_submitted => true {list_dates($_[0], $_)} @all_users);
+        name => $_[0], slurp_json($folder_configs, $_[0]),
+        num_submitted => true {list_dates($_[0], $_->name)} @all_users);
 }
-sub list_folders { map { folder $_ } @_; }
 sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
-sub list_users { map { user $_ } @users; }
 sub list_dates {
     my ($folder, $user) = @_;
-    my @dates = dir_list($folder_files, $folder, $user);
-    @dates = map { date $_ } @dates;
+    my @dates = map { date $_ } dir_list($folder_files, $folder, $user);
     @dates = grep { -d filename($folder, $user, $_) } @dates;
     @dates = grep {start_date() le $_} @dates if start_date();
     @dates = grep {end_date() ge $_} @dates if end_date();
     @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
     return @dates;
+}
+sub list_files {
+    my ($folder, $user, $date) = @_;
+    map {FileInfo->new(name=>$_,
+                       size=>-s filename($folder->name,$user->name,$date,$_))}
+        dir_list($folder_files, $folder->name, $user->name, $date);
 }
 sub filename { join('/', DIR, $folder_files, @_); }
 
@@ -378,36 +358,34 @@ sub filename { join('/', DIR, $folder_files, @_); }
 sub form_url { my %args = @_; "?" . join "&", map {"$_=$args{$_}"} keys %args }
 sub href { my ($href, @rest) = @_; $q->a({-href=>$href}, @rest); }
 sub multilist { $q->scrolling_list(
-                    -name=>$_[0], -multiple=>1, -size=>3,
+                    -name=>$_[0], -multiple=>1, -size=>5,
                     -values=>[@_[1..$#_]], -default=>[@_[1..$#_]]); }
-sub boxes { my %args = @_;
-            join $q->br(),
-            map { $q->checkbox(-name=>$_,-checked=>1,-label=>$args{$_}) }
-            keys %args }
+sub boxes { my ($name, $value, $label, @rest) = @_;
+            $q->checkbox($name, $value, 'on', $label) .
+                (@rest ? $q->br() . boxes(@rest) : ""); }
 sub row { my ($pre, $span, @data) = @_;
           $q->Tr(($pre ? $q->td({-colspan=>$pre}) : ()),
                  $q->td({-colspan=>$span}, [@data])) }
-sub multirow {
-    my ($prefix, @rows) = @_;
-    "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
-        join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>";
-}
+sub multirow { my ($prefix, @rows) = @_;
+               "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
+                   join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>"; }
 
 ################
 # General Utils
 ################
 
-sub read_config { %{decode_json(trusted slurp(join('/', DIR, @_)))}; }
+sub slurp_json { %{decode_json(trusted slurp(join('/', DIR, @_)))} }
+sub intersect { my %a = map {($_,1)} @{$_[0]}; grep {$a{$_}} @{$_[1]} }
 
-sub intersect {
-    my ($a, $b) = @_; my %a = map {($_,1)} @$a; return grep {$a{$_}} @$b;
+sub intersect_key {
+    my ($list1, $fun, $list2) = @_;
+    my %a = map {($_,1)} @{$_[2]};
+    sort {&$fun($a) cmp &$fun($b)} grep {$a{$_[1]->($_)}} @{$_[0]}
 }
 
 sub dir_list {
-    my $d = DirHandle->new(join '/', DIR, @_);
-    my @ds = $d ? $d->read : ();
-    $d->close if $d;
-    @ds = grep {!/^\./} @ds; # skip dot files
-    @ds = grep {!/~$/} @ds; # skip backup files
-    return sort @ds;
+    my $d = DirHandle->new(join '/', DIR, @_) or return ();
+    my @ds = $d->read;
+    $d->close;
+    return sort grep {!/^\./} @ds; # skip dot files
 }
