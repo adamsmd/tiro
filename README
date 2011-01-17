@@ -39,3 +39,14 @@ NOTES:
 
 Thanks to the testers:
   TODO
+
+
+Avoid Class::Struct
+avoid prototypes
+$_ =~ $foo->bar easier to read than /@{[$foo->bar]}/
+${\$foo->bar}
+File::Spec
+Path::Class
+use Path::Class; dir( $foo )->children
+don't like interleaving code and sub defs
+

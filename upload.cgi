@@ -9,7 +9,7 @@ use CGI qw/-private_tempfiles -nosticky/;
 use Class::Struct;
 use File::Copy; # copy() but move() has tainting issues
 use File::Path qw/mkpath/;
-use DirHandle;
+use File::Spec::Functions;
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 # Modules not from Core
@@ -27,9 +27,9 @@ use constant DIR => "/u-/adamsmd/projects/upload/demo"; # Root of all paths
 use constant GLOBAL_CONFIG_FILE => "global_config.json";
 
 # Structs
-struct GlobalConfig=>{
-    title=>'$', folder_configs=>'$', folder_files=>'$', folder_regex=>'$',
-    path=>'$', post_max=>'$', admins=>'*@', users=>'*%'};
+struct GlobalConfig=>{title=>'$', folder_configs=>'$', folder_files=>'$',
+                      folder_regex=>'$', path=>'$', post_max=>'$',
+                      admins=>'*@', users=>'*%'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct FolderConfig=>{name=>'$', num_submitted =>'$',title=>'$', text=>'$',
                       due=>'$', file_count=>'$', checkers=>'@'};
@@ -51,27 +51,20 @@ die $q->cgi_error() if $q->cgi_error();
 ################
 
 # Input formats
-sub trusted ($) { ($_[0] =~ /^(.*)$/s)[0]; }
-sub date ($) { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
-sub file ($) { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
-sub bool ($) { $_[0] ? 1 : 0; }
-sub search_bool ($) { (not from_search() or $_[0]) ? 1 : 0; }
-
-sub param (%) { my (%hash) = @_;
-                for (keys %hash) {
-                    eval "sub $_ () { '@{[$hash{$_}->($q->param($_))]}' }";
-                    eval "sub @{[uc $_]} () { '$_' }";
-                } }
+sub date { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
+sub file { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
+sub bool { $_[0] ? 1 : 0; }
+sub search_bool { (not from_search() or $_[0]) ? 1 : 0; }
 
 # Basic Inputs
 my $now = date "now";
-param(start_date => \&date, end_date => \&date);
-param(do_search => \&bool, from_search => \&bool,
-      do_download => \&bool, do_upload => \&bool, do_results => \&bool);
-param(only_latest => \&bool, do_checks => \&bool);
-param(submitted_yes => \&search_bool, submitted_no => \&search_bool);
-param(due_past => \&search_bool, due_future => \&search_bool);
-param(sort_by => \&file);
+define_param(start_date => \&date, end_date => \&date);
+define_param(do_search => \&bool, from_search => \&bool,
+             do_download => \&bool, do_upload => \&bool, do_results => \&bool);
+define_param(only_latest => \&bool, do_checks => \&bool);
+define_param(submitted_yes => \&search_bool, submitted_no => \&search_bool);
+define_param(due_past => \&search_bool, due_future => \&search_bool);
+define_param(sort_by => \&file);
 use constant { SORT_FOLDER=>'folder', SORT_USER=>'user', SORT_DATE=>'date' };
 
 # Complex Inputs
@@ -79,7 +72,7 @@ my $folder_configs = file $global_config->folder_configs;
 my $folder_files = file $global_config->folder_files;
 
 my $remote_user = file $q->remote_user();
-$remote_user="user1"; # HACK
+$remote_user="user1"; # HACK for demo purposes
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
 use constant {USERS => "users", FOLDERS => "folders",  FILE => 'file' };
@@ -196,7 +189,8 @@ h2 { border-bottom:2px solid black; }
 .results tbody TR:first-child td+td+td+td+td+td+td+td { text-align:right; }
 .results tbody TR+TR td+td { text-align:right; }
 .results tbody TR+TR td+td[colspan] { text-align:left; }
-.results tbody TR td[colspan="1"]+td { background:#EEE; }
+.results tbody TR td[colspan="1"]+td { background:#EEE;
+}
 .folder { width:100%; border-bottom:1px solid black; }
 .body { margin-left:22em; }
 .body table+p { text-align:right; font-size: small; }
@@ -349,11 +343,21 @@ sub list_files {
                        size=>-s filename($folder->name,$user->name,$date,$_))}
         dir_list($folder_files, $folder->name, $user->name, $date);
 }
-sub filename { join('/', DIR, $folder_files, @_); }
+sub filename { catfile(DIR, $folder_files, @_); }
 
 ################
 # HTML Utils
 ################
+
+sub define_param {
+    my (%hash) = @_;
+    for my $key (keys %hash) {
+        no strict 'refs';
+        my $val = $hash{$key}->($q->param($key));
+        *$key = sub () { $val; };
+        *{uc $key} = sub () { $key; };
+    }
+}
 
 sub form_url { my %args = @_; "?" . join "&", map {"$_=$args{$_}"} keys %args }
 sub href { my ($href, @rest) = @_; $q->a({-href=>$href}, @rest); }
@@ -374,7 +378,8 @@ sub multirow { my ($prefix, @rows) = @_;
 # General Utils
 ################
 
-sub slurp_json { %{decode_json(trusted slurp(join('/', DIR, @_)))} }
+sub trusted { ($_[0] =~ /^(.*)$/s)[0]; } # Untaint the value
+sub slurp_json { %{decode_json(trusted(scalar(slurp(catfile(DIR, @_)))))} }
 sub intersect { my %a = map {($_,1)} @{$_[0]}; grep {$a{$_}} @{$_[1]} }
 
 sub intersect_key {
@@ -384,8 +389,8 @@ sub intersect_key {
 }
 
 sub dir_list {
-    my $d = DirHandle->new(join '/', DIR, @_) or return ();
-    my @ds = $d->read;
-    $d->close;
+    opendir(my $d, catdir(DIR, @_)) or return ();
+    my @ds = readdir($d);
+    closedir $d;
     return sort grep {!/^\./} @ds; # skip dot files
 }
