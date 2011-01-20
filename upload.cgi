@@ -36,6 +36,21 @@ struct FolderConfig=>{name=>'$', num_submitted =>'$',title=>'$', text=>'$',
 struct Row=>{folder=>'FolderConfig', user=>'UserConfig', date=>'$', files=>'@'};
 struct FileInfo=>{name=>'$', size=>'$'};
 
+#Global
+#title
+#folder_configs
+#folder_files
+#folder_regex
+#path
+#post_max
+#admins
+#
+#Users:
+#name full_name expires
+#
+#Folder:
+#name, title, text, due, file_count, checkers
+
 ################
 # Bootstrap
 ################
@@ -71,8 +86,8 @@ use constant { SORT_FOLDER=>'folder', SORT_USER=>'user', SORT_DATE=>'date' };
 my $folder_configs = file $global_config->folder_configs;
 my $folder_files = file $global_config->folder_files;
 
-my $remote_user = file $q->remote_user();
-$remote_user="user1"; # HACK for demo purposes
+my $remote_user = file ($q->remote_user() =~ /^(\w+)\@/);
+#$remote_user="user1"; # HACK for demo purposes
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
 use constant {USERS => "users", FOLDERS => "folders",  FILE => 'file' };
@@ -95,6 +110,7 @@ my @files = $q->upload(FILE);
 # Main Code
 ################
 
+#error("|", $q->remote_user(), "|", $remote_user);
 error("No such user: $remote_user")
     unless exists $global_config->users->{$remote_user};
 error("Access for $remote_user expired as of ", user($remote_user)->expires)
@@ -135,17 +151,17 @@ sub upload {
     @files == uniq map { file $_ } @files or error("Duplicate file names.");
     my $folder = $folders[0] or error("No folder selected for upload.");
 
-    my $target_dir = filename($folder,$remote_user,$now);
+    my $target_dir = filename($folder->name,$remote_user,$now);
     mkpath($target_dir) or
-        error("Can't mkdir in $folder for $remote_user at $now: $!");
+        error("Can't mkdir in @{[$folder->name]} for $remote_user at $now: $!");
     foreach my $file (@files) {
         my $name = file $file;
         copy($file, "$target_dir/$name") or
-            error("Can't save $name in $folder for $remote_user at $now: $!");
+            error("Can't save $name in @{[$folder->name]} for $remote_user at $now: $!");
     }
     print $q->redirect(-status=>303, # HTTP_SEE_OTHER
                        -uri=>form_url(DO_RESULTS(), 1, DO_CHECKS(), do_checks(),
-                                      FOLDERS, $folder, USERS, $remote_user,
+                                      FOLDERS, $folder->name, USERS, $remote_user,
                                       START_DATE(), $now, END_DATE(), $now));
 }
 
@@ -193,7 +209,7 @@ h2 { border-bottom:2px solid black; }
 }
 .folder { width:100%; border-bottom:1px solid black; }
 .body { margin-left:22em; }
-.body table+p { text-align:right; font-size: small; }
+.footer { clear:left; text-align:right; font-size: small; }
 EOT
 
     say $q->h1($global_config->title);
@@ -311,10 +327,11 @@ EOT
             }
         }
         say $q->end_table();
-
-        say $q->p("Produced by upload.cgi at $now");
         say $q->end_div();
     }
+
+    say $q->p({-class=>'footer'},
+              "Produced by upload.cgi for $remote_user at $now");
     say $q->end_html();
 }
 
