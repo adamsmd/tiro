@@ -83,9 +83,6 @@ define_param(sort_by => \&file);
 use constant { SORT_FOLDER=>'folder', SORT_USER=>'user', SORT_DATE=>'date' };
 
 # Complex Inputs
-my $folder_configs = file $global_config->folder_configs;
-my $folder_files = file $global_config->folder_files;
-
 my $remote_user = file ($q->remote_user() =~ /^(\w+)\@/);
 #$remote_user="user1"; # HACK for demo purposes
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
@@ -96,8 +93,7 @@ my @all_users = $is_admin ? sort keys %{$global_config->users} : ($remote_user);
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect_key(\@all_users, sub {$_[0]->name}, \@users);
 
-my @all_folders = map { folder(file $_) }
-  map { /@{[$global_config->folder_regex]}/ } dir_list($folder_configs);
+my @all_folders = list_folders();
 my @folders = map { file $_ } $q->param(FOLDERS);
 @folders = intersect_key(\@all_folders, sub {$_[0]->name}, \@folders);
 @folders = grep { due_past() and $_->due le $now or
@@ -110,7 +106,6 @@ my @files = $q->upload(FILE);
 # Main Code
 ################
 
-#error("|", $q->remote_user(), "|", $remote_user);
 error("No such user: $remote_user")
     unless exists $global_config->users->{$remote_user};
 error("Access for $remote_user expired as of ", user($remote_user)->expires)
@@ -339,15 +334,21 @@ EOT
 # Listings
 ################
 
-sub folder {
-    FolderConfig->new(
-        name => $_[0], slurp_json($folder_configs, $_[0]),
-        num_submitted => true {list_dates($_[0], $_->name)} @all_users);
+sub list_folders {
+    map { my $path = $_;
+          my ($name) = /@{[$global_config->folder_regex]}/;
+          $name ? FolderConfig->new(
+              name=> $name,
+              num_submitted=> (true {list_dates($path, $_->name)} @all_users),
+              slurp_json($global_config->folder_configs, $path)) :
+              (); }
+    dir_list($global_config->folder_configs);
 }
 sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
 sub list_dates {
     my ($folder, $user) = @_;
-    my @dates = map { date $_ } dir_list($folder_files, $folder, $user);
+    my @dates = map { date $_ } dir_list(
+        $global_config->folder_files, $folder, $user);
     @dates = grep { -d filename($folder, $user, $_) } @dates;
     @dates = grep {start_date() le $_} @dates if start_date();
     @dates = grep {end_date() ge $_} @dates if end_date();
@@ -358,9 +359,9 @@ sub list_files {
     my ($folder, $user, $date) = @_;
     map {FileInfo->new(name=>$_,
                        size=>-s filename($folder->name,$user->name,$date,$_))}
-        dir_list($folder_files, $folder->name, $user->name, $date);
+    dir_list($global_config->folder_files, $folder->name, $user->name, $date);
 }
-sub filename { catfile(DIR, $folder_files, @_); }
+sub filename { catfile(DIR, $global_config->folder_files, @_); }
 
 ################
 # HTML Utils
