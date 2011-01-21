@@ -2,7 +2,7 @@
 use warnings; # Full warnings
 use strict; # Strict error checking
 $|++; # Unbuffer stdout
-umask 0077; # Default to private files
+umask 0177; # Default to private files
 
 # Modules from Core
 use CGI qw/-private_tempfiles -nosticky/;
