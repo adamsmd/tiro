@@ -23,13 +23,14 @@ use List::MoreUtils ':all';
 ################
 
 # File Paths
+#use constant DIR => "/l/cgi/rpjames/cgi-pub"; # Root of all paths
 use constant DIR => "/u-/adamsmd/projects/upload/demo"; # Root of all paths
 use constant GLOBAL_CONFIG_FILE => "global_config.json";
 
 # Structs
 struct GlobalConfig=>{title=>'$', folder_configs=>'$', folder_files=>'$',
                       folder_regex=>'$', path=>'$', post_max=>'$',
-                      admins=>'*@', users=>'*%'};
+                      date_format=>'$', admins=>'*@', users=>'*%'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct FolderConfig=>{name=>'$', num_submitted =>'$',title=>'$', text=>'$',
                       due=>'$', file_count=>'$', checkers=>'@'};
@@ -191,7 +192,7 @@ sub render {
 th { vertical-align:top; text-align:left; }
 td { vertical-align:top; }
 h2 { border-bottom:2px solid black; }
-.navbar { padding:0.3em; width:20em;float:left;border:solid black 1px; }
+.navbar { padding:0.3em; width:19em; float:left; border:solid black 1px; }
 .navbar > h3:first-child { margin-top:0; } /* Stop spurious margin */
 .search TR td * { width:100%; }
 .results { width:100%;border-collapse: collapse; }
@@ -203,7 +204,7 @@ h2 { border-bottom:2px solid black; }
 .results tbody TR td[colspan="1"]+td { background:#EEE;
 }
 .folder { width:100%; border-bottom:1px solid black; }
-.body { margin-left:22em; }
+.body { margin-left:21em; }
 .footer { clear:left; text-align:right; font-size: small; }
 EOT
 
@@ -211,18 +212,18 @@ EOT
 
     say $q->start_div({-class=>'navbar'});
 
-    say $q->h3("Select Folder");
+    say $q->h3("Select Assignment");
     say $q->start_table();
     foreach my $folder (@all_folders) {
         say row(0, 2, href(form_url(DO_RESULTS(), 1, FOLDERS, $folder->name),
                            $folder->name . ":", $folder->title));
         my $num_submitted = $folder->num_submitted;
         my $num_users = @all_users;
-        say row(0, 1, $q->small("&nbsp;&nbsp;Due " . $folder->due),
+        say row(0, 1, $q->small("&nbsp;&nbsp;Due " . pretty_date($folder->due)),
                 $q->small($num_submitted ?
-                          (" - Submitted" .
+                          (" - Done" .
                            ($is_admin ? " ($num_submitted/$num_users)" : "")) :
-                          ($now ge $folder->due ? " - Overdue" : "")));
+                          ($now ge $folder->due ? " - Late" : "")));
     }
     say $q->end_table();
 
@@ -235,7 +236,7 @@ EOT
         say $q->hidden(-name=>FROM_SEARCH(), -default=>1);
         map { say row(0, 1, @$_) } (
             ["User:", multilist(USERS, map {$_->name} @all_users)],
-            ["Folder:", multilist(FOLDERS, map {$_->name} @all_folders)],
+            ["Assignment:", multilist(FOLDERS, map {$_->name} @all_folders)],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
             ["Run checks:", $q->checkbox(-name=>DO_CHECKS(), -label=>'')],
@@ -246,9 +247,9 @@ EOT
                             ONLY_LATEST(), only_latest(), 'Only Most Recent')],
             ["Sort by: ",
              scalar($q->radio_group(
-                        -name=>SORT_BY(), -default=>[SORT_FOLDER],
+                        -columns=>1, -name=>SORT_BY(), -default=>[SORT_FOLDER],
                         -values=>[SORT_FOLDER, SORT_USER, SORT_DATE],
-                        -labels=>{SORT_FOLDER, "Folder",
+                        -labels=>{SORT_FOLDER, "Assignment",
                                   SORT_USER, "User",
                                   SORT_DATE, "Date"}))],
             ["", $q->submit(-value=>"Search")]);
@@ -259,14 +260,14 @@ EOT
 
     if (do_results()) {
         say $q->start_div({-class=>'body'});
-        say $q->h2("Upload new files");
 
         my @no_results = ('No results to display.',
                           'Browse or search to select folders.');
         say $q->center(@no_results) unless @folders;
         foreach my $folder (@folders) {
             say $q->start_div({-class=>'folder'});
-            say $q->h3($folder->title,"(".$folder->name.") - due",$folder->due);
+            say $q->h2($folder->name . ": ", $folder->title);
+            say $q->h4("Due by ", pretty_date($folder->due));
             say $q->div($folder->text);
 
             say $q->start_form(-method=>'POST', -enctype=>&CGI::MULTIPART,
@@ -283,8 +284,8 @@ EOT
 
         say $q->h2("Previously uploaded files");
         say $q->start_table({-class=>'results'});
-        say $q->thead($q->Tr($q->th(['Folder','Title','User','Name','Date',
-                                     'Check', 'Files','Size (bytes)'])));
+        say $q->thead($q->Tr($q->th(["#","Title","User","Name","Date",
+                                     "Check", "Files","Size<br/>(bytes)"])));
         if (not @rows) { say row(0, 8, $q->center(@no_results)); }
         else {
             foreach my $row (@rows) {
@@ -298,8 +299,8 @@ EOT
                 my $check = form_url(@url, DO_CHECKS(), 1, DO_RESULTS(), 1);
                 say multirow([$row->folder->name, $row->folder->title,
                               $row->user->name, $row->user->full_name,
-                              ($row->date ?
-                               ($row->date, href($check, "[check]")) :
+                              ($row->date ? (pretty_date($row->date),
+                                             href($check, "[check]")) :
                                ("(No uploads)", ""))], @file_rows);
 
                 if (do_checks() and $row->date) {
@@ -377,6 +378,7 @@ sub define_param {
     }
 }
 
+sub pretty_date { UnixDate($_[0], $global_config->date_format) }
 sub form_url { my %args = @_; "?" . join "&", map {"$_=$args{$_}"} keys %args }
 sub href { my ($href, @rest) = @_; $q->a({-href=>$href}, @rest); }
 sub multilist { $q->scrolling_list(
