@@ -277,7 +277,8 @@ EOT
             for my $i (1..$folder->file_count) {
                 say $q->p("File $i:", $q->filefield(-name=>FILE, -override=>1));
             }
-            say $q->p($q->submit(DO_UPLOAD(), "Upload files"));
+            say $q->p($q->submit(DO_UPLOAD(), "Upload files"))
+                if $folder->file_count;
             say $q->end_form();
             say $q->end_div();
         }
