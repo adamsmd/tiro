@@ -1,20 +1,21 @@
 
 # TODO:
-# - Per assignment banner should be read from a file.
-# - Consistent date formatting via pp_date (done)
+# + Per assignment banner should be read from a file.
+# + Consistent date formatting via pp_date (done)
 # - Add color to late submissions
 # - Disable needles check messages
 # - Put submission status next to LHS asst menu
 # - Display all submissions after upload
 # - (low) Remove assignment description from search page
-# - TODO: asst vs folder
+# + TODO: asst vs folder
 # - New path root structure
-# Variable width left bar
-# Submitted line
-# Welcome line
-# Rename with ASST
-# Assignment name in search
-
+# - Variable width left bar
+# - Submitted line
+# + Welcome line
+# + Rename with ASST
+# - Assignment name in search
+# - Missing date in expired
+# - Reformat "no results to display"
 
 Future features:
 * Critical
