@@ -1,3 +1,9 @@
+Changes:
+  checks -> tests
+  global_config_file is absolute path
+  DIR is not working_dir and process will cd to there
+  global_config_hash is where you can place configs
+
 
 # TODO:
 # + Per assignment banner should be read from a file.

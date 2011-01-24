@@ -4,6 +4,15 @@ use strict; # Strict error checking
 $|++; # Unbuffer stdout
 umask 0177; # Default to private files
 
+# Configuration
+my %global_config_hash = (
+use constant DIR => ""; # Root of all paths
+#    global_config_file=>"/l/cgi/rpjames/cgi-pub/global_config.json",
+#    working_dir=>"/l/cgi/rpjames/cgi-pub/",
+    global_config_file=>"/u-/adamsmd/projects/upload/demo/global_config.json",
+    working_dir=>"/u-/adamsmd/projects/upload/demo"
+    );
+
 # Modules from Core
 use CGI qw/-private_tempfiles -nosticky/;
 use Class::Struct;
@@ -23,15 +32,10 @@ use List::MoreUtils ':all';
 # Static Defs
 ################
 
-# File Paths
-#use constant DIR => "/l/cgi/rpjames/cgi-pub"; # Root of all paths
-use constant DIR => "/u-/adamsmd/projects/upload/demo"; # Root of all paths
-use constant GLOBAL_CONFIG_FILE => "global_config.json";
-
 # Structs
 struct GlobalConfig=>{title=>'$', admins=>'*@', assignment_configs=>'$',
                       assignment_files=>'$', assignment_regex=>'$', path=>'$',
-                      post_max=>'$', date_format=>'$', users=>'*%'};
+                      post_max=>'$', date_format=>'$', users=>'*%', working_dir=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
     name=>'$', num_submitted =>'$',title=>'$', text=>'$',
@@ -60,7 +64,10 @@ struct FileInfo=>{name=>'$', size=>'$'};
 ################
 
 my $start_time = time();
-my $global_config = GlobalConfig->new(slurp_json(GLOBAL_CONFIG_FILE));
+my $global_config = GlobalConfig->new(
+    %global_config_hash, exists $global_config_hash{'global_config_file'} ?
+    slurp_json($global_config_hash{'global_config_file'}) : ());
+chdir $global_config->working_dir or error("$!");
 $CGI::POST_MAX = $global_config->post_max;
 $ENV{PATH} = $global_config->path;
 my $q = CGI->new;
@@ -283,8 +290,7 @@ EOT
             say $q->start_div({-class=>'assignment'});
             say $q->h2($assignment->name . ": ", $assignment->title);
             say $q->h4("Due by ", pretty_date($assignment->due));
-            say $q->div(scalar(slurp(catfile(DIR,
-                                             $global_config->assignment_configs,
+            say $q->div(scalar(slurp(catfile($global_config->assignment_configs,
                                              $assignment->text_file))))
                 if defined $assignment->text_file;
             say $q->div($assignment->text) if defined $assignment->text;
@@ -386,7 +392,7 @@ sub list_files {
     dir_list($global_config->assignment_files,
              $assignment->name, $user->name, $date);
 }
-sub filename { catfile(DIR, $global_config->assignment_files, @_); }
+sub filename { catfile($global_config->assignment_files, @_); }
 
 ################
 # HTML Utils
@@ -423,7 +429,7 @@ sub multirow { my ($prefix, @rows) = @_;
 ################
 
 sub trusted { ($_[0] =~ /^(.*)$/s)[0]; } # Untaint the value
-sub slurp_json { %{decode_json(trusted(scalar(slurp(catfile(DIR, @_)))))} }
+sub slurp_json { %{decode_json(trusted(scalar(slurp(catfile(@_)))))} }
 sub intersect { my %a = map {($_,1)} @{$_[0]}; grep {$a{$_}} @{$_[1]} }
 
 sub intersect_key {
@@ -433,7 +439,7 @@ sub intersect_key {
 }
 
 sub dir_list {
-    opendir(my $d, catdir(DIR, @_)) or return ();
+    opendir(my $d, catdir(@_)) or return ();
     my @ds = readdir($d);
     closedir $d;
     return sort grep {!/^\./} @ds; # skip dot files
