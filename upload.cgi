@@ -10,6 +10,7 @@ use Class::Struct;
 use File::Copy; # copy() but move() has tainting issues
 use File::Path qw/mkpath/;
 use File::Spec::Functions;
+use Time::HiRes qw/time/;
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 # Modules not from Core
@@ -58,6 +59,7 @@ struct FileInfo=>{name=>'$', size=>'$'};
 # Bootstrap
 ################
 
+my $start_time = time();
 my $global_config = GlobalConfig->new(slurp_json(GLOBAL_CONFIG_FILE));
 $CGI::POST_MAX = $global_config->post_max;
 $ENV{PATH} = $global_config->path;
@@ -215,8 +217,11 @@ h2 { border-bottom:2px solid black; }
 .assignment { width:100%; border-bottom:1px solid black; }
 .body { margin-left:21em; }
 .footer { clear:left; text-align:right; font-size: small; }
+.welcome { float:right; font-weight:bold; }
 EOT
 
+    say $q->div({-class=>'welcome'},
+                "Welcome $remote_user<br>Current time is", pretty_date($now));
     say $q->h1($global_config->title);
 
     say $q->start_div({-class=>'navbar'});
@@ -342,8 +347,8 @@ EOT
         say $q->end_div();
     }
 
-    say $q->p({-class=>'footer'},
-              "Produced by upload.cgi for $remote_user at $now");
+    say $q->p({-class=>'footer'}, "Completed in",
+              sprintf("%0.3f", time() - $start_time), "seconds.");
     say $q->end_html();
 }
 
