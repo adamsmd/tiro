@@ -3,9 +3,10 @@
 # + Per assignment banner should be read from a file.
 # + Consistent date formatting via pp_date (done)
 # - Add color to late submissions
-# - Disable needles check messages
+# + Disable needles check messages
 # - Put submission status next to LHS asst menu
-# - Display all submissions after upload
+# - Display all submissions after upload (but not test all)
+#   - Link to show all submissions?
 # - (low) Remove assignment description from search page
 # + TODO: asst vs folder
 # - New path root structure

@@ -35,7 +35,7 @@ struct GlobalConfig=>{title=>'$', admins=>'*@', assignment_configs=>'$',
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
     name=>'$', num_submitted =>'$',title=>'$', text=>'$',
-    text_file=>'$', due=>'$', file_count=>'$', checkers=>'@'};
+    text_file=>'$', due=>'$', file_count=>'$', tests=>'@'};
 struct Row=>{
     assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
 struct FileInfo=>{name=>'$', size=>'$'};
@@ -53,7 +53,7 @@ struct FileInfo=>{name=>'$', size=>'$'};
 #name full_name expires
 #
 #Assignment:
-#name, title, text, due, file_count, checkers
+#name, title, text, due, file_count, tests
 
 ################
 # Bootstrap
@@ -82,7 +82,7 @@ my $now = date "now";
 define_param(start_date => \&date, end_date => \&date);
 define_param(do_search => \&bool, from_search => \&bool,
              do_download => \&bool, do_upload => \&bool, do_results => \&bool);
-define_param(only_latest => \&bool, do_checks => \&bool);
+define_param(only_latest => \&bool, do_tests => \&bool);
 define_param(submitted_yes => \&search_bool, submitted_no => \&search_bool);
 define_param(due_past => \&search_bool, due_future => \&search_bool);
 define_param(sort_by => \&keyword);
@@ -164,7 +164,7 @@ sub upload {
                   "for $remote_user at $now: $!");
     }
     print $q->redirect(-status=>303, # HTTP_SEE_OTHER
-                       -uri=>form_url(DO_RESULTS(), 1, DO_CHECKS(), do_checks(),
+                       -uri=>form_url(DO_RESULTS(), 1, DO_TESTS(), do_tests(),
                                       ASSIGNMENTS, $assignment->name,
                                       USERS, $remote_user,
                                       START_DATE(), $now, END_DATE(), $now));
@@ -254,7 +254,7 @@ EOT
             ["Assignment:", multilist(ASSIGNMENTS, map {$_->name} @all_assignments)],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
-            ["Run checks:", $q->checkbox(-name=>DO_CHECKS(), -label=>'')],
+            ["Run tests:", $q->checkbox(-name=>DO_TESTS(), -label=>'')],
             ["Show:", boxes(SUBMITTED_YES(), submitted_yes(), 'Submitted',
                             SUBMITTED_NO(), submitted_no(), 'Unsubmitted',
                             DUE_PAST(), due_past(), 'Due in the Past',
@@ -293,7 +293,7 @@ EOT
                                -action=>'#');
             say $q->hidden(-name=>ASSIGNMENTS, -value=>$assignment->name,
                            -override=>1);
-            say $q->hidden(-name=>DO_CHECKS(), -value=>1, -override=>1);
+            say $q->hidden(-name=>DO_TESTS(), -value=>1, -override=>1);
             say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
                 for (1..$assignment->file_count);
             say $q->p($q->submit(DO_UPLOAD(), "Upload files"))
@@ -305,7 +305,7 @@ EOT
         say $q->h2("Previously uploaded files");
         say $q->start_table({-class=>'results'});
         say $q->thead($q->Tr($q->th(["#","Title","User","Name","Date",
-                                     "Check", "Files","Size<br/>(bytes)"])));
+                                     "Run<br/>Tests", "Files","Size<br/>(bytes)"])));
         if (not @rows) { say row(0, 8, $q->center(@no_results)); }
         else {
             foreach my $row (@rows) {
@@ -317,19 +317,19 @@ EOT
                     map {[href(form_url(@url, DO_DOWNLOAD(), 1, FILE, $_->name),
                                $_->name),
                           $_->size] } @{$row->files} : ["(No files)", ""];
-                my $check = form_url(@url, DO_CHECKS(), 1, DO_RESULTS(), 1);
+                my $test = form_url(@url, DO_TESTS(), 1, DO_RESULTS(), 1);
                 say multirow([$row->assignment->name, $row->assignment->title,
                               $row->user->name, $row->user->full_name,
                               ($row->date ? (pretty_date($row->date),
-                                             href($check, "[check]")) :
+                                             href($test, "Run")) :
                                ("(No uploads)", ""))], @file_rows);
 
-                if (do_checks() and $row->date) {
-                    my @checkers = @{$row->assignment->checkers};
-                    my $len = @checkers;
+                if (do_tests() and $row->date) {
+                    my @tests = @{$row->assignment->tests};
+                    my $len = @tests;
                     my @indexes = (1..$len);
                     my $passed = true {$_ == 0} pairwise
-                    { say row(1, 7, "Running @{[$b->[0]]} (check $a of $len)");
+                    { say row(1, 7, "Running @{[$b->[0]]} (test $a of $len)");
                       say $q->start_Tr(), $q->td({-colspan=>2}, "");
                       say $q->start_td({-colspan=>6}), $q->start_div();
                       system @$b[1..$#$b], filename(
@@ -337,8 +337,9 @@ EOT
                       die $! if $? == -1;
                       say $q->end_div(), $q->end_td(), $q->end_Tr();
                       say row(2, 6, $? ? 'Failed' : 'Passed');
-                      $? } @indexes, @checkers;
-                    say row(1, 7, "Passed $passed of $len checks");
+                      $? } @indexes, @tests;
+                    say row(1, 7, @tests ? "Passed $passed of $len tests"
+                                         : "(No tests)");
                 }
                 say $q->end_tbody();
             }
