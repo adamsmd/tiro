@@ -6,7 +6,6 @@ umask 0177; # Default to private files
 
 # Configuration
 my %global_config_hash = (
-use constant DIR => ""; # Root of all paths
 #    global_config_file=>"/l/cgi/rpjames/cgi-pub/global_config.json",
 #    working_dir=>"/l/cgi/rpjames/cgi-pub/",
     global_config_file=>"/u-/adamsmd/projects/upload/demo/global_config.json",
@@ -38,7 +37,7 @@ struct GlobalConfig=>{title=>'$', admins=>'*@', assignment_configs=>'$',
                       post_max=>'$', date_format=>'$', users=>'*%', working_dir=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
-    name=>'$', num_submitted =>'$',title=>'$', text=>'$',
+    name=>'$', num_done =>'$',title=>'$', text=>'$',
     text_file=>'$', due=>'$', file_count=>'$', tests=>'@'};
 struct Row=>{
     assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
@@ -87,10 +86,10 @@ sub search_bool { (not from_search() or $_[0]) ? 1 : 0; }
 # Basic Inputs
 my $now = date "now";
 define_param(start_date => \&date, end_date => \&date);
-define_param(do_search => \&bool, from_search => \&bool,
-             do_download => \&bool, do_upload => \&bool, do_results => \&bool);
+define_param(do_search => \&bool, from_search => \&bool, do_download => \&bool,
+             do_upload => \&bool, do_upload_form => \&bool, do_results => \&bool);
 define_param(only_latest => \&bool, do_tests => \&bool);
-define_param(submitted_yes => \&search_bool, submitted_no => \&search_bool);
+define_param(done_yes => \&search_bool, done_no => \&search_bool);
 define_param(due_past => \&search_bool, due_future => \&search_bool);
 define_param(sort_by => \&keyword);
 use constant {SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'};
@@ -184,12 +183,11 @@ sub search_results {
             my @dates = list_dates($assignment->name, $user->name);
             push @rows, Row->new(
                 assignment=>$assignment, user=>$user, date=>'', files=>[])
-                if submitted_no() and not @dates;
+                if done_no() and not @dates;
             foreach (@dates) {
                 push @rows, Row->new(
                     assignment=>$assignment, user=>$user, date=>$_,
-                    files=>[list_files($assignment, $user, $_)])
-                    if submitted_yes();
+                    files=>[list_files($assignment, $user, $_)]) if done_yes();
             }
         }
     }
@@ -221,7 +219,7 @@ h2 { border-bottom:2px solid black; }
 .results tbody TR+TR td+td[colspan] { text-align:left; }
 .results tbody TR td[colspan="1"]+td { background:#EEE;
 }
-.assignment { width:100%; border-bottom:1px solid black; }
+.assignment { width:100%; border-bottom:1px solid black; margin-bottom:1.3em; }
 .body { margin-left:21em; }
 .footer { clear:left; text-align:right; font-size: small; }
 .welcome { float:right; font-weight:bold; }
@@ -236,15 +234,16 @@ EOT
     say $q->h3("Select Assignment");
     say $q->start_table();
     foreach my $assignment (@all_assignments) {
-        say row(0, 2, href(form_url(DO_RESULTS(),1,ASSIGNMENTS,$assignment->name),
+        say row(0, 2, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
+                                    ASSIGNMENTS, $assignment->name),
                            $assignment->name . ": ", $assignment->title));
-        my $num_submitted = $assignment->num_submitted;
+        my $num_done = $assignment->num_done;
         my $num_users = @all_users;
         say row(0, 1,
                 $q->small("&nbsp;&nbsp;Due ".pretty_date($assignment->due)),
-                $q->small($num_submitted ?
+                $q->small($num_done ?
                           (" - Done" .
-                           ($is_admin ? " ($num_submitted/$num_users)" : "")) :
+                           ($is_admin ? " ($num_done/$num_users)" : "")) :
                           ($now ge $assignment->due ? " - Late" : "")));
     }
     say $q->end_table();
@@ -259,14 +258,18 @@ EOT
         map { say row(0, 1, @$_) } (
             ["User:", multilist(USERS, map {$_->name} @all_users)],
             ["Assignment:", multilist(ASSIGNMENTS, map {$_->name} @all_assignments)],
+            ["Show:",
+             boxes(DO_TESTS(), do_tests(), 'Tests',
+                   DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form')],
+            ["","&nbsp;"],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
-            ["Run tests:", $q->checkbox(-name=>DO_TESTS(), -label=>'')],
-            ["Show:", boxes(SUBMITTED_YES(), submitted_yes(), 'Submitted',
-                            SUBMITTED_NO(), submitted_no(), 'Unsubmitted',
-                            DUE_PAST(), due_past(), 'Due in the Past',
-                            DUE_FUTURE(), due_future(), 'Due in the Future',
-                            ONLY_LATEST(), only_latest(), 'Only Most Recent')],
+            ["Select Only:",
+             boxes(ONLY_LATEST(), only_latest(), 'Most Recent and',
+                   DONE_YES(), done_yes(), 'Done or',
+                   DONE_NO(), done_no(), 'Not Done or',
+                   DUE_PAST(), due_past(), 'Due in Past or',
+                   DUE_FUTURE(), due_future(), 'Due in Future')],
             ["Sort by: ",
              scalar($q->radio_group(
                         -columns=>1, -name=>SORT_BY(), -default=>[SORT_ASSIGNMENT],
@@ -280,11 +283,10 @@ EOT
     }
     say $q->end_div();
 
-    if (do_results()) {
-        say $q->start_div({-class=>'body'});
-
-        my @no_results = ('No results to display.',
-                          'Browse or search to select assignment.');
+    say $q->start_div({-class=>'body'});
+    my @no_results = ('No results to display.',
+                      'Browse or search to select assignment.');
+    if (do_upload_form()) {
         say $q->center(@no_results) unless @assignments;
         foreach my $assignment (@assignments) {
             say $q->start_div({-class=>'assignment'});
@@ -307,8 +309,9 @@ EOT
             say $q->end_form();
             say $q->end_div();
         }
+    }
 
-        say $q->h2("Previously uploaded files");
+    if (do_results()) {
         say $q->start_table({-class=>'results'});
         say $q->thead($q->Tr($q->th(["#","Title","User","Name","Date",
                                      "Run<br/>Tests", "Files","Size<br/>(bytes)"])));
@@ -351,8 +354,8 @@ EOT
             }
         }
         say $q->end_table();
-        say $q->end_div();
     }
+    say $q->end_div();
 
     say $q->p({-class=>'footer'}, "Completed in",
               sprintf("%0.3f", time() - $start_time), "seconds.");
@@ -368,7 +371,7 @@ sub list_assignments {
           my ($name) = /@{[$global_config->assignment_regex]}/;
           $name ? AssignmentConfig->new(
               name=> $name,
-              num_submitted=> (true {list_dates($path, $_->name)} @all_users),
+              num_done=> (true {list_dates($path, $_->name)} @all_users),
               slurp_json($global_config->assignment_configs, $path)) :
               (); }
     dir_list($global_config->assignment_configs);
