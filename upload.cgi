@@ -9,7 +9,9 @@ my %global_config_hash = (
 #    global_config_file=>"/l/cgi/rpjames/cgi-pub/global_config.json",
 #    working_dir=>"/l/cgi/rpjames/cgi-pub/",
     global_config_file=>"/u-/adamsmd/projects/upload/demo/global_config.json",
-    working_dir=>"/u-/adamsmd/projects/upload/demo"
+    working_dir=>"/u-/adamsmd/projects/upload/demo",
+    user_config_file=>"/u-/adamsmd/projects/upload/demo/user_config_file.csv",
+    user_name=>0, user_full_name=>1, user_expires=>2,
     );
 
 # Modules from Core
@@ -18,6 +20,7 @@ use Class::Struct;
 use File::Copy; # copy() but move() has tainting issues
 use File::Path qw/mkpath/;
 use File::Spec::Functions;
+use Text::ParseWords;
 use Time::HiRes qw/time/;
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
@@ -32,9 +35,10 @@ use List::MoreUtils ':all';
 ################
 
 # Structs
-struct GlobalConfig=>{title=>'$', admins=>'*@', assignment_configs=>'$',
-                      assignment_files=>'$', assignment_regex=>'$', path=>'$',
-                      post_max=>'$', date_format=>'$', users=>'*%', working_dir=>'$'};
+struct GlobalConfig=>{
+    title=>'$', admins=>'*@', assignment_configs=>'$', assignment_files=>'$',
+    assignment_regex=>'$', path=>'$', post_max=>'$', date_format=>'$',
+    users=>'*%', working_dir=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
     name=>'$', num_done =>'$',title=>'$', text=>'$',
@@ -43,29 +47,34 @@ struct Row=>{
     assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
 struct FileInfo=>{name=>'$', size=>'$'};
 
-#Global
-#title
-#assignment_configs
-#assignment_files
-#assignment_regex
-#path
-#post_max
-#admins
-#
-#Users:
-#name full_name expires
-#
-#Assignment:
-#name, title, text, due, file_count, tests
-
 ################
 # Bootstrap
 ################
 
 my $start_time = time();
-my $global_config = GlobalConfig->new(
-    %global_config_hash, exists $global_config_hash{'global_config_file'} ?
-    slurp_json($global_config_hash{'global_config_file'}) : ());
+
+if (exists $global_config_hash{'global_config_file'}) {
+    my ($hash) = parse_config($global_config_hash{'global_config_file'},
+                              'admins', 'users');
+    $hash->{'users'} = { map { /\s*(.*)\s*--\s*(.*)\s*--\s*/;
+                               ($1, { full_name => $2, expires => $3 }) }
+                         @{$hash->{'users'}} };
+    %global_config_hash = (%global_config_hash, %{$hash});
+}
+
+if (exists $global_config_hash{'user_config_file'}) {
+    for (split "\n", slurp $global_config_hash{'user_config_file'}) {
+        my @words = quotewords(",", 0, $_);
+        my $name = $words[$global_config_hash{'user_name'}];
+        my $full_name = $words[$global_config_hash{'user_full_name'}];
+        my $expires = $words[$global_config_hash{'user_expires'}];
+        $global_config_hash{'users'}->{$name} =
+        { full_name=>$full_name, expires=>$expires }
+        if defined $name and defined $full_name and defined $expires;
+    }
+}
+
+my $global_config = GlobalConfig->new(%global_config_hash);
 chdir $global_config->working_dir or error("$!");
 $CGI::POST_MAX = $global_config->post_max;
 $ENV{PATH} = $global_config->path;
@@ -96,11 +105,12 @@ use constant {SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'}
 
 # Complex Inputs
 my $remote_user = file ($q->remote_user() =~ /^(\w+)\@/);
-#$remote_user="user1"; # HACK for demo purposes
+$remote_user="user1"; # HACK for demo purposes
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
 use constant {USERS => "users", ASSIGNMENTS => "assignments",  FILE => 'file' };
 my @all_users = $is_admin ? sort keys %{$global_config->users} : ($remote_user);
+
 @all_users = map { user($_) } @all_users;
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect_key(\@all_users, sub {$_[0]->name}, \@users);
@@ -119,7 +129,7 @@ my @files = $q->upload(FILE);
 ################
 
 error("No such user: $remote_user")
-    unless exists $global_config->users->{$remote_user};
+    unless %{$global_config->users->{$remote_user}};
 error("Access for $remote_user expired as of ", user($remote_user)->expires)
     unless $now lt date(user($remote_user)->expires);
 
@@ -341,7 +351,7 @@ EOT
                     { say row(1, 7, "Running @{[$b->[0]]} (test $a of $len)");
                       say $q->start_Tr(), $q->td({-colspan=>2}, "");
                       say $q->start_td({-colspan=>6}), $q->start_div();
-                      system @$b[1..$#$b], filename(
+                      system $b->[1] . " " . filename(
                           $row->assignment->name, $row->user->name, $row->date);
                       die $! if $? == -1;
                       say $q->end_div(), $q->end_td(), $q->end_Tr();
@@ -369,22 +379,30 @@ EOT
 sub list_assignments {
     map { my $path = $_;
           my ($name) = /@{[$global_config->assignment_regex]}/;
-          $name ? AssignmentConfig->new(
-              name=> $name,
-              num_done=> (true {list_dates($path, $_->name)} @all_users),
-              slurp_json($global_config->assignment_configs, $path)) :
-              (); }
+          if (not defined $name) { (); }
+          else {
+              my ($hash, $body) = parse_config(
+                  catfile($global_config->assignment_configs, $path), 'tests');
+              $hash->{'tests'} =
+                  [map {[/^(.*?)\s*--\s*(.*)$/]} @{$hash->{'tests'}}];
+              AssignmentConfig->new(
+                  name=> $name,
+                  num_done=> (true {list_dates($path, $_->name, 1)} @all_users),
+                  text=>$body,
+                  %{$hash});
+          }
+    }
     dir_list($global_config->assignment_configs);
 }
 sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
 sub list_dates {
-    my ($assignment, $user) = @_;
+    my ($assignment, $user, $all) = @_;
     my @dates = map { date $_ } dir_list(
         $global_config->assignment_files, $assignment, $user);
     @dates = grep { -d filename($assignment, $user, $_) } @dates;
-    @dates = grep {start_date() le $_} @dates if start_date();
-    @dates = grep {end_date() ge $_} @dates if end_date();
-    @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
+    @dates = grep {start_date() le $_} @dates if not $all and start_date();
+    @dates = grep {end_date() ge $_} @dates if not $all and end_date();
+    @dates = ($dates[$#dates]) if !$all and $#dates != -1 and only_latest();    
     return @dates;
 }
 sub list_files {
@@ -431,8 +449,6 @@ sub multirow { my ($prefix, @rows) = @_;
 # General Utils
 ################
 
-sub trusted { ($_[0] =~ /^(.*)$/s)[0]; } # Untaint the value
-sub slurp_json { %{decode_json(trusted(scalar(slurp(catfile(@_)))))} }
 sub intersect { my %a = map {($_,1)} @{$_[0]}; grep {$a{$_}} @{$_[1]} }
 
 sub intersect_key {
@@ -446,4 +462,22 @@ sub dir_list {
     my @ds = readdir($d);
     closedir $d;
     return sort grep {!/^\./} @ds; # skip dot files
+}
+
+sub parse_config {
+    my ($filename, @lists) = @_;
+    my ($lines, $body) = slurp($filename) =~ /^(.*?)\n\n(.*)$/s;
+    $lines =~ s/^\s*#.*$//m; # Remove comments
+    my %hash = map { ($_, []) } @lists;
+    for (split "\n", $lines) {
+        my ($key, $value) = /^\s*([^:]*)\s*:\s*(.*)\s*$/;
+        if (defined $key and defined $value) {
+            if (grep { $_ eq $key } @lists) {
+                push @{$hash{$key}}, $value;
+            } else {
+                $hash{$key} = $value;
+            }
+        }
+    }
+    return (\%hash, $body);
 }

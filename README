@@ -6,6 +6,8 @@ Changes:
 
 
 # TODO:
+# - Print "(no assignments)"
+# - Fix strange formatting when blank config file
 # + Per assignment banner should be read from a file.
 # + Consistent date formatting via pp_date (done)
 # - Add color to late submissions
