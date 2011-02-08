@@ -25,7 +25,6 @@ use Time::HiRes qw/time/;
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 # Modules not from Core
-use JSON;
 use Date::Manip;
 use File::Slurp qw(slurp); # Perl 6 feature
 use List::MoreUtils ':all';
@@ -56,7 +55,7 @@ my $start_time = time();
 if (exists $global_config_hash{'global_config_file'}) {
     my ($hash) = parse_config($global_config_hash{'global_config_file'},
                               'admins', 'users');
-    $hash->{'users'} = { map { /\s*(.*)\s*--\s*(.*)\s*--\s*/;
+    $hash->{'users'} = { map { /\s*(.*?)\s*--\s*(.*?)\s*--\s*(.*)\s*/;
                                ($1, { full_name => $2, expires => $3 }) }
                          @{$hash->{'users'}} };
     %global_config_hash = (%global_config_hash, %{$hash});
