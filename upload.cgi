@@ -6,12 +6,24 @@ umask 0177; # Default to private files
 
 # Configuration
 my %global_config_hash = (
-#    global_config_file=>"/l/cgi/rpjames/cgi-pub/global_config.json",
-#    working_dir=>"/l/cgi/rpjames/cgi-pub/",
     global_config_file=>"/u-/adamsmd/projects/upload/demo/global_config.json",
     working_dir=>"/u-/adamsmd/projects/upload/demo",
-    user_config_file=>"/u-/adamsmd/projects/upload/demo/user_config_file.csv",
-    user_name=>0, user_full_name=>1, user_expires=>2,
+
+    remote_user_override => 'user1',
+
+    assignment_configs => 'folder_configs',
+    assignment_configs_regex => qr[^(\w+)$],
+    assignment_uploads => 'folder_files',
+
+    title => 'Assignment Upload Demo',
+    path => '/usr/bin',
+    max_upload_size => 10000,
+    date_format => '%a, %b %d, %r',
+
+    admins => ['adamsmd', 'user1'],
+    users => [['user4', 'User Four', 'Jan 1, 2100']],
+    user_config_file=>"user_config_file.csv",
+    user_name_column =>0, user_full_name_column=>1, user_expires_column=>2,
     );
 
 # Modules from Core
@@ -35,9 +47,9 @@ use List::MoreUtils ':all';
 
 # Structs
 struct GlobalConfig=>{
-    title=>'$', admins=>'*@', assignment_configs=>'$', assignment_files=>'$',
-    assignment_regex=>'$', path=>'$', post_max=>'$', date_format=>'$',
-    users=>'*%', working_dir=>'$'};
+    title=>'$', admins=>'*@', assignment_configs=>'$', assignment_uploads=>'$',
+    assignment_configs_regex=>'$', path=>'$', max_upload_size=>'$',
+    date_format=>'$', users=>'*%', working_dir=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
     name=>'$', num_done =>'$',title=>'$', text=>'$',
@@ -61,12 +73,16 @@ if (exists $global_config_hash{'global_config_file'}) {
     %global_config_hash = (%global_config_hash, %{$hash});
 }
 
+chdir $global_config_hash{'working_dir'} or error("$!");
+
 if (exists $global_config_hash{'user_config_file'}) {
     for (split "\n", slurp $global_config_hash{'user_config_file'}) {
         my @words = quotewords(",", 0, $_);
-        my $name = $words[$global_config_hash{'user_name'}];
-        my $full_name = $words[$global_config_hash{'user_full_name'}];
-        my $expires = $words[$global_config_hash{'user_expires'}];
+        my $name = $words[$global_config_hash{'user_name_column'}];
+        my $full_name = $words[$global_config_hash{'user_full_name_column'}];
+        my $expires = exists $global_config_hash{'user_expires_column'} ?
+            $words[$global_config_hash{'user_expires_column'}] :
+            'tomorrow';
         $global_config_hash{'users'}->{$name} =
         { full_name=>$full_name, expires=>$expires }
         if defined $name and defined $full_name and defined $expires;
@@ -74,8 +90,7 @@ if (exists $global_config_hash{'user_config_file'}) {
 }
 
 my $global_config = GlobalConfig->new(%global_config_hash);
-chdir $global_config->working_dir or error("$!");
-$CGI::POST_MAX = $global_config->post_max;
+$CGI::POST_MAX = $global_config->max_upload_size;
 $ENV{PATH} = $global_config->path;
 my $q = CGI->new;
 die $q->cgi_error() if $q->cgi_error();
@@ -103,8 +118,9 @@ define_param(sort_by => \&keyword);
 use constant {SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'};
 
 # Complex Inputs
-my $remote_user = file ($q->remote_user() =~ /^(\w+)\@/);
-$remote_user="user1"; # HACK for demo purposes
+my ($tainted_remote_user) = $global_config_hash{'remote_user_override'} ||
+    $q->remote_user() =~ /^(\w+)\@/;
+my $remote_user = file($tainted_remote_user);
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
 use constant {USERS => "users", ASSIGNMENTS => "assignments",  FILE => 'file' };
@@ -127,6 +143,8 @@ my @files = $q->upload(FILE);
 # Main Code
 ################
 
+error('Malformed remote user "' . $tainted_remote_user . '".',
+      "Missing .htaccess?") unless $remote_user;
 error("No such user: $remote_user")
     unless %{$global_config->users->{$remote_user}};
 error("Access for $remote_user expired as of ", user($remote_user)->expires)
@@ -266,11 +284,13 @@ EOT
         say $q->hidden(-name=>FROM_SEARCH(), -default=>1);
         map { say row(0, 1, @$_) } (
             ["User:", multilist(USERS, map {$_->name} @all_users)],
-            ["Assignment:", multilist(ASSIGNMENTS, map {$_->name} @all_assignments)],
+            ["Assignment:", multilist(ASSIGNMENTS,
+                                      map {$_->name} @all_assignments)],
             ["Show:",
-             boxes(DO_TESTS(), do_tests(), 'Tests',
+             boxes(DO_TESTS(), do_tests(), 'Test results',
                    DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form')],
             ["","&nbsp;"],
+            ["<b>Advanced</b>", ""],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
             ["Select Only:",
@@ -281,7 +301,8 @@ EOT
                    DUE_FUTURE(), due_future(), 'Due in Future')],
             ["Sort by: ",
              scalar($q->radio_group(
-                        -columns=>1, -name=>SORT_BY(), -default=>[SORT_ASSIGNMENT],
+                        -columns=>1, -name=>SORT_BY(),
+                        -default=>[SORT_ASSIGNMENT],
                         -values=>[SORT_ASSIGNMENT, SORT_USER, SORT_DATE],
                         -labels=>{SORT_ASSIGNMENT, "Assignment",
                                   SORT_USER, "User",
@@ -322,8 +343,9 @@ EOT
 
     if (do_results()) {
         say $q->start_table({-class=>'results'});
-        say $q->thead($q->Tr($q->th(["#","Title","User","Name","Date",
-                                     "Run<br/>Tests", "Files","Size<br/>(bytes)"])));
+        say $q->thead(
+            $q->Tr($q->th(["#", "Title", "User"," Name", "Date",
+                           "Run<br/>Tests", "Files", "Size<br/>(bytes)"])));
         if (not @rows) { say row(0, 8, $q->center(@no_results)); }
         else {
             foreach my $row (@rows) {
@@ -339,7 +361,9 @@ EOT
                 say multirow([$row->assignment->name, $row->assignment->title,
                               $row->user->name, $row->user->full_name,
                               ($row->date ? (pretty_date($row->date),
-                                             href($test, "Run")) :
+                                             @{$row->assignment->tests} ?
+                                             href($test, "Run") :
+                                             "(No tests)") :
                                ("(No uploads)", ""))], @file_rows);
 
                 if (do_tests() and $row->date) {
@@ -377,7 +401,7 @@ EOT
 
 sub list_assignments {
     map { my $path = $_;
-          my ($name) = /@{[$global_config->assignment_regex]}/;
+          my ($name) = /@{[$global_config->assignment_configs_regex]}/;
           if (not defined $name) { (); }
           else {
               my ($hash, $body) = parse_config(
@@ -397,7 +421,7 @@ sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
 sub list_dates {
     my ($assignment, $user, $all) = @_;
     my @dates = map { date $_ } dir_list(
-        $global_config->assignment_files, $assignment, $user);
+        $global_config->assignment_uploads, $assignment, $user);
     @dates = grep { -d filename($assignment, $user, $_) } @dates;
     @dates = grep {start_date() le $_} @dates if not $all and start_date();
     @dates = grep {end_date() ge $_} @dates if not $all and end_date();
@@ -409,10 +433,10 @@ sub list_files {
     map {FileInfo->new(name=>$_,
                        size=>-s filename(
                            $assignment->name,$user->name,$date,$_))}
-    dir_list($global_config->assignment_files,
+    dir_list($global_config->assignment_uploads,
              $assignment->name, $user->name, $date);
 }
-sub filename { catfile($global_config->assignment_files, @_); }
+sub filename { catfile($global_config->assignment_uploads, @_); }
 
 ################
 # HTML Utils
@@ -469,7 +493,7 @@ sub parse_config {
     $lines =~ s/^\s*#.*$//m; # Remove comments
     my %hash = map { ($_, []) } @lists;
     for (split "\n", $lines) {
-        my ($key, $value) = /^\s*([^:]*)\s*:\s*(.*)\s*$/;
+        my ($key, $value) = /^\s*([^:]*?)\s*:\s*(.*?)\s*$/;
         if (defined $key and defined $value) {
             if (grep { $_ eq $key } @lists) {
                 push @{$hash{$key}}, $value;
