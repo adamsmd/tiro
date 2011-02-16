@@ -104,18 +104,20 @@ sub date { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
 sub file { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
 sub keyword { (($_[0] or "") =~ qr/^([A-Za-z0-9]*)/)[0]; }
 sub bool { $_[0] ? 1 : 0; }
-sub search_bool { (not from_search() or $_[0]) ? 1 : 0; }
 
 # Basic Inputs
 my $now = date "now";
 define_param(start_date => \&date, end_date => \&date);
-define_param(do_search => \&bool, from_search => \&bool, do_download => \&bool,
-             do_upload => \&bool, do_upload_form => \&bool, do_results => \&bool);
+define_param(do_search => \&bool, do_download => \&bool, do_upload => \&bool,
+             do_upload_form => \&bool, do_results => \&bool);
 define_param(only_latest => \&bool, do_tests => \&bool);
-define_param(done_yes => \&search_bool, done_no => \&search_bool);
-define_param(due_past => \&search_bool, due_future => \&search_bool);
+define_param(submitted => \&keyword, due => \&keyword);
+use constant {SUBMITTED_YES=>"submitted", SUBMITTED_NO=>"unsubmitted",
+              SUBMITTED_ANY=>"any"};
+use constant {DUE_PAST=>'past',DUE_FUTURE=>'future',DUE_ANY=>'any'};
 define_param(sort_by => \&keyword);
-use constant {SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'};
+use constant {
+    SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'};
 
 # Complex Inputs
 my ($tainted_remote_user) = $global_config_hash{'remote_user_override'} ||
@@ -133,8 +135,8 @@ my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 my @all_assignments = list_assignments();
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect_key(\@all_assignments,sub {$_[0]->name},\@assignments);
-@assignments = grep { due_past() and $_->due le $now or
-                  due_future() and $_->due gt $now} @assignments;
+@assignments = grep { due() ne DUE_FUTURE and $_->due le $now or
+                          due() ne DUE_PAST and $_->due gt $now} @assignments;
 
 my $file = file $q->param(FILE);
 my @files = $q->upload(FILE);
@@ -210,11 +212,12 @@ sub search_results {
             my @dates = list_dates($assignment->name, $user->name);
             push @rows, Row->new(
                 assignment=>$assignment, user=>$user, date=>'', files=>[])
-                if done_no() and not @dates;
+                if submitted() ne SUBMITTED_YES and not @dates;
             foreach (@dates) {
                 push @rows, Row->new(
                     assignment=>$assignment, user=>$user, date=>$_,
-                    files=>[list_files($assignment, $user, $_)]) if done_yes();
+                    files=>[list_files($assignment, $user, $_)]) if
+                    submitted() ne SUBMITTED_NO;
             }
         }
     }
@@ -236,6 +239,8 @@ th { vertical-align:top; text-align:left; }
 td { vertical-align:top; }
 h2 { border-bottom:2px solid black; }
 .navbar { padding:0.3em; width:19em; float:left; border:solid black 1px; }
+.navbar td { vertical-align: baseline; }
+.navbar form td { vertical-align: top; }
 .navbar > h3:first-child { margin-top:0; } /* Stop spurious margin */
 .search TR td * { width:100%; }
 .results { width:100%;border-collapse: collapse; }
@@ -261,17 +266,18 @@ EOT
     say $q->h3("Select Assignment");
     say $q->start_table();
     foreach my $assignment (@all_assignments) {
-        say row(0, 2, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
-                                    ASSIGNMENTS, $assignment->name),
-                           $assignment->name . ": ", $assignment->title));
         my $num_done = $assignment->num_done;
         my $num_users = @all_users;
+        say row(0, 1, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
+                                    ASSIGNMENTS, $assignment->name),
+                           $assignment->name . ": ", $assignment->title),
+                "&nbsp;" . ($num_done ?
+                            ("&#x2611;" .
+                             ($is_admin ? "&nbsp;($num_done/$num_users)" : "")) :
+                            ("&#x2610;" .
+                             ($now ge $assignment->due ? "&nbsp;Late!" : ""))));
         say row(0, 1,
-                $q->small("&nbsp;&nbsp;Due ".pretty_date($assignment->due)),
-                $q->small($num_done ?
-                          (" - Done" .
-                           ($is_admin ? " ($num_done/$num_users)" : "")) :
-                          ($now ge $assignment->due ? " - Late" : "")));
+                $q->small("&nbsp;&nbsp;Due ".pretty_date($assignment->due)));
     }
     say $q->end_table();
 
@@ -281,24 +287,34 @@ EOT
         say $q->start_table({-class=>'search'});
         say $q->hidden(-name=>DO_SEARCH(), -default=>1);
         say $q->hidden(-name=>DO_RESULTS(), -default=>1);
-        say $q->hidden(-name=>FROM_SEARCH(), -default=>1);
         map { say row(0, 1, @$_) } (
             ["User:", multilist(USERS, map {$_->name} @all_users)],
             ["Assignment:", multilist(ASSIGNMENTS,
                                       map {$_->name} @all_assignments)],
             ["Show:",
-             boxes(DO_TESTS(), do_tests(), 'Test results',
-                   DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form')],
+             boxes(ONLY_LATEST(), only_latest(), 'Only Most Recent',
+                   DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form',
+                   DO_TESTS(), do_tests(), 'Test results')],
             ["","&nbsp;"],
             ["<b>Advanced</b>", ""],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
-            ["Select Only:",
-             boxes(ONLY_LATEST(), only_latest(), 'Most Recent and',
-                   DONE_YES(), done_yes(), 'Done or',
-                   DONE_NO(), done_no(), 'Not Done or',
-                   DUE_PAST(), due_past(), 'Due in Past or',
-                   DUE_FUTURE(), due_future(), 'Due in Future')],
+            ["Status:",
+             scalar($q->radio_group(
+                        -columns=>1, -name=>SUBMITTED(),
+                        -default=>[SUBMITTED_ANY],
+                        -values=>[SUBMITTED_ANY, SUBMITTED_YES, SUBMITTED_NO],
+                        -labels=>{SUBMITTED_ANY, "Any",
+                                  SUBMITTED_YES, "Submitted",
+                                  SUBMITTED_NO, "Unsubmitted"}))],
+            ["Due:",
+             scalar($q->radio_group(
+                        -columns=>1, -name=>DUE(),
+                        -default=>[DUE_ANY],
+                        -values=>[DUE_ANY, DUE_PAST, DUE_FUTURE],
+                        -labels=>{DUE_ANY, "Any",
+                                  DUE_PAST, "Past",
+                                  DUE_FUTURE, "Future"}))],
             ["Sort by: ",
              scalar($q->radio_group(
                         -columns=>1, -name=>SORT_BY(),
