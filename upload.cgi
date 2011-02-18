@@ -295,6 +295,7 @@ EOT
              boxes(ONLY_LATEST(), only_latest(), 'Only Most Recent',
                    DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form',
                    DO_TESTS(), do_tests(), 'Test results')],
+            ["", $q->submit(-value=>"Search")],
             ["","&nbsp;"],
             ["<b>Advanced</b>", ""],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
