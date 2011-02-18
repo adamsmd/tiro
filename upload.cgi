@@ -52,7 +52,7 @@ struct GlobalConfig=>{
     date_format=>'$', users=>'*%', working_dir=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
-    name=>'$', num_done =>'$',title=>'$', text=>'$',
+    name=>'$', num_done =>'$', on_time=>'$', title=>'$', text=>'$',
     text_file=>'$', due=>'$', file_count=>'$', tests=>'@'};
 struct Row=>{
     assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
@@ -271,12 +271,11 @@ EOT
         say row(0, 1, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
                                     ASSIGNMENTS, $assignment->name),
                            $assignment->name . ": ", $assignment->title),
-                "&nbsp;" . ($num_done ?
-                            ("&#x2611;" .
-                             ($is_admin ? "&nbsp;($num_done/$num_users)" : "")) :
-                            ("&#x2610;" .
-                             ($now ge $assignment->due ? "&nbsp;Late!" : ""))));
-        say row(0, 1,
+                "&nbsp;" . ($num_done ? "&#x2611;" : "&#x2610;") .
+                ($is_admin ? $q->small("&nbsp;($num_done/$num_users)") : "") .
+                (((!$assignment->on_time) && $now ge $assignment->due) ?
+                 "&nbsp;Late" : ""));
+        say row(0, 2,
                 $q->small("&nbsp;&nbsp;Due ".pretty_date($assignment->due)));
     }
     say $q->end_table();
@@ -425,9 +424,13 @@ sub list_assignments {
                   catfile($global_config->assignment_configs, $path), 'tests');
               $hash->{'tests'} =
                   [map {[/^(.*?)\s*--\s*(.*)$/]} @{$hash->{'tests'}}];
+              $hash->{'due'} = date($hash->{'due'});
+              my @dates = map {[list_dates($path, $_->name, 1)]} @all_users;
+              my @all_dates = map {@$_} @dates;
               AssignmentConfig->new(
                   name=> $name,
-                  num_done=> (true {list_dates($path, $_->name, 1)} @all_users),
+                  num_done=> (true {@$_} @dates),
+                  on_time=> (any {$_ le $hash->{'due'}} @all_dates),
                   text=>$body,
                   %{$hash});
           }
