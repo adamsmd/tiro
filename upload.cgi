@@ -97,6 +97,8 @@ my $q = CGI->new;
 die $q->cgi_error() if $q->cgi_error();
 
 warn "remote_user=", $q->remote_user();
+warn "remote_host=", $q->remote_host();
+warn "referer=", $q->referer();
 for my $i ($q->param) { warn "param $i=", join(":",$q->param($i)); }
 
 if (string_true($global_config->user_config_file)) {
