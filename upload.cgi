@@ -274,11 +274,12 @@ h2 { border-bottom:2px solid black; }
 .body { margin-left:21em; }
 .footer { clear:left; text-align:right; font-size: small; }
 .welcome { float:right; font-weight:bold; }
+h1 a { text-decoration:none;color:WindowText; }
 EOT
 
     say $q->div({-class=>'welcome'},
                 "Welcome $remote_user<br>Current time is", pretty_date($now));
-    say $q->h1($global_config->title);
+    say $q->h1(href(form_url(), $global_config->title));
 
     say $q->start_div({-class=>'navbar'});
 
