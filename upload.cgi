@@ -341,10 +341,7 @@ EOT
     say $q->end_div();
 
     say $q->start_div({-class=>'body'});
-    my @no_results = ('No results to display.',
-                      'Browse or search to select assignment.');
     if (do_upload_form()) {
-        say $q->center(@no_results) unless @assignments;
         foreach my $assignment (@assignments) {
             say $q->start_div({-class=>'assignment'});
             say $q->h2($assignment->name . ": ", $assignment->title);
@@ -373,8 +370,10 @@ EOT
         say $q->thead(
             $q->Tr($q->th(["#", "Title", "User"," Name", "Date",
                            "Run<br/>Tests", "Files", "Size<br/>(bytes)"])));
-        if (not @rows) { say row(0, 8, $q->center(@no_results)); }
-        else {
+        if (not @rows) {
+            say row(0, 8, $q->center('No results to display.',
+                                     'Browse or search to select assignment.'));
+        } else {
             foreach my $row (@rows) {
                 say $q->start_tbody();
                 my @url = (ASSIGNMENTS, $row->assignment->name,
