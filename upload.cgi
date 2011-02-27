@@ -256,6 +256,7 @@ sub render {
     print $q->header();
     say $q->start_html(-title=>$global_config->title,
                        -style=>{-verbatim=><<'EOT'});
+h1 a { text-decoration:none;color:WindowText; }
 th { vertical-align:top; text-align:left; }
 td { vertical-align:top; }
 h2 { border-bottom:2px solid black; }
@@ -263,7 +264,9 @@ h2 { border-bottom:2px solid black; }
 .navbar td { vertical-align: baseline; }
 .navbar form td { vertical-align: top; }
 .navbar > h3:first-child { margin-top:0; } /* Stop spurious margin */
-.search TR td * { width:100%; }
+.search { width:100%; }
+.search select { width:100%; }
+.search input[type="text"] { width:90%; }
 .results { width:100%;border-collapse: collapse; }
 .results thead { border-bottom:2px solid black; }
 .results tbody { border-bottom:1px solid black; }
@@ -276,7 +279,6 @@ h2 { border-bottom:2px solid black; }
 .body { margin-left:21em; }
 .footer { clear:left; text-align:right; font-size: small; }
 .welcome { float:right; font-weight:bold; }
-h1 a { text-decoration:none;color:WindowText; }
 EOT
 
     say $q->div({-class=>'welcome'},
