@@ -37,7 +37,7 @@ my %global_config_hash = (
 # tests: -- Always Fail -- perl -e "exit 1"
 # tests: Always Fail -- -- perl -e "exit 1"
 
-# Confirmation responce
+# Upload confirmation
 # Oldest vs Newest First
 # Custom Assignment Order
 
@@ -108,6 +108,7 @@ if (string_true($global_config->log)) {
 }
 
 $CGI::POST_MAX = $global_config->max_upload_size;
+delete @ENV{qw(IFS CDPATH ENV BASH_ENV)};   # Make %ENV safer
 $ENV{PATH} = $global_config->path;
 my $q = CGI->new;
 die $q->cgi_error() if $q->cgi_error();
@@ -288,12 +289,13 @@ sub render {
   .search select { width:100%; }
   .search input[type="text"] { width:90%; }
   .results { width:100%;border-collapse: collapse; }
-  .results thead { border-bottom:2px solid black; }
-  .results tbody { border-bottom:1px solid black; }
-  .results tbody TR:first-child td+td+td+td+td+td+td+td { text-align:right; }
-  .results tbody TR+TR td+td { text-align:right; }
-  .results tbody TR+TR td+td[colspan] { text-align:left; }
-  .results tbody TR td[colspan="1"]+td { background:rgb(95%,95%,95%);}
+  .results>thead { border-bottom:2px solid black; }
+  .results>tbody { border-bottom:1px solid black; }
+  .results>tbody>TR:first-child>td+td+td+td+td+td+td+td { text-align:right; }
+  .results>tbody>TR+TR>td+td { text-align:right; }
+  .results>tbody>TR+TR>td+td[colspan] { text-align:left; }
+/*  .results tbody TR+TR td+td[colspan] { text-align:left; } */
+/*  .results tbody TR td[colspan="1"]+td { background:rgb(95%,95%,95%);} */
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
   .body { margin-left:21em; }
   .footer { clear:left; text-align:right; font-size: small; }
@@ -424,21 +426,43 @@ EOT
                        ("(No uploads)", ""))], @file_rows);
 
         if (do_tests() and $row->date) {
-          my @tests = @{$row->assignment->tests};
-          my $len = @tests;
-          my @indexes = (1..$len);
-          my $passed = true {$_ == 0} pairwise
-          { say row(1, 7, "Running @{[$b->[0]]} (test $a of $len)");
-            say $q->start_Tr(), $q->td({-colspan=>2}, "");
-            say $q->start_td({-colspan=>6}), $q->start_div();
-            system $b->[1] . " " . filename(
-              $row->assignment->name, $row->user->name, $row->date);
-            die $! if $? == -1;
-            say $q->end_div(), $q->end_td(), $q->end_Tr();
-            say row(2, 6, $? ? 'Failed' : 'Passed');
-            $? } @indexes, @tests;
-          say row(1, 7, @tests ? "Passed $passed of $len tests"
-                  : "(No tests)");
+#          my @tests = @{$row->assignment->tests};
+#          my $len = @tests;
+          $ENV{'TIRO_SUBMISSION'} = filename(
+            $row->assignment->name, $row->user->name, $row->date);
+          for my $hook (@{$row->assignment->tests}) {
+            say "<tr><td></td><td colspan=7><div>";
+            system $hook;
+            say "</div></td></tr>";
+          }
+#          my $passed = 0;
+#          for my $i (0..$#tests) {
+#            say $q->start_Tr(), $q->td({-colspan=>1}, "");
+#            say $q->start_td({-colspan=>7}), $q->start_div();
+##            system $cmd;
+#            die $! if $? == -1; # TODO: check on this
+#            say $q->end_div(), $q->end_td(), $q->end_Tr();
+
+#            my ($name, $cmd) = @{$tests[$i]};
+#            say row(1, 7, "Running $name (test @{[$i+1]} of $len)");
+#            say $q->start_Tr(), $q->td({-colspan=>2}, "");
+#            say $q->start_td({-colspan=>6}), $q->start_div();
+#            system $cmd;
+#            die $! if $? == -1;
+#            say $q->end_div(), $q->end_td(), $q->end_Tr();
+#            say row(2, 6, $? ? 'Failed' : 'Passed');
+#            $passed++ if $?;
+#          }
+#          my $passed = true {$_ == 0} pairwise
+#          { say row(1, 7, "Running @{[$b->[0]]} (test $a of $len)");
+#            say $q->start_Tr(), $q->td({-colspan=>2}, "");
+#            say $q->start_td({-colspan=>6}), $q->start_div();
+#            system $b->[1];
+#            die $! if $? == -1;
+#            say $q->end_div(), $q->end_td(), $q->end_Tr();
+#            say row(2, 6, $? ? 'Failed' : 'Passed');
+#            $? } @indexes, @tests;
+          #say row(1, 7, @tests ? "Passed $passed of $len tests" : "(No tests)");
         }
         say $q->end_tbody();
       }
@@ -465,8 +489,8 @@ sub list_assignments {
         else {
           my ($hash, $body) = parse_config(
             catfile($global_config->assignment_configs, $path), 'tests');
-          $hash->{'tests'} =
-            [map {[/^(.*?)\s*--\s*(.*)$/]} @{$hash->{'tests'}}];
+#          $hash->{'tests'} =
+#            [map {[/^(.*?)\s*--\s*(.*)$/]} @{$hash->{'tests'}}];
           $hash->{'due'} = date($hash->{'due'});
           $hash->{'hidden_until'} = date($hash->{'hidden_until'});
           AssignmentConfig->new(
