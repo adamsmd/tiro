@@ -2,7 +2,7 @@
 use warnings; # Full warnings
 use strict; # Strict error checking
 $|++; # Unbuffer stdout
-umask 0177; # Default to private files
+umask 0077; # Default to private files
 
 # Configuration
 my %global_config_hash = (
@@ -21,13 +21,16 @@ my %global_config_hash = (
     date_format => '%a, %b %d, %r',
 
     admins => ['adamsmd', 'user1'],
-    users => [['user4', 'User Four', 'Jan 1, 2100']],
+    users => { user5 => { full_name => 'User Five', expires=>'Jan 1, 2100'} },
     user_config_file=>"user_config_file.csv",
-    user_name_column =>0, user_full_name_column=>1, user_expires_column=>2,
+    user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
+
+    log => 'log.txt',
     );
 
 # Modules from Core
 use CGI qw/-private_tempfiles -nosticky/;
+use CGI::Carp qw/carpout/;
 use Class::Struct;
 use File::Copy; # copy() but move() has tainting issues
 use File::Path qw/mkpath/;
@@ -47,9 +50,11 @@ use List::MoreUtils ':all';
 
 # Structs
 struct GlobalConfig=>{
+    global_config_file=>'$', user_config_file=>'$', remote_user_override=>'$',
+    user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
     title=>'$', admins=>'*@', assignment_configs=>'$', assignment_uploads=>'$',
     assignment_configs_regex=>'$', path=>'$', max_upload_size=>'$',
-    date_format=>'$', users=>'*%', working_dir=>'$'};
+    date_format=>'$', users=>'*%', working_dir=>'$', log=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
     name=>'$', num_done =>'$', on_time=>'$', title=>'$', text=>'$',
@@ -62,38 +67,52 @@ struct FileInfo=>{name=>'$', size=>'$'};
 # Bootstrap
 ################
 
-my $start_time = time();
+sub string_true { (defined $_[0]) and ($_[0] ne "") }
 
-if (exists $global_config_hash{'global_config_file'}) {
-    my ($hash) = parse_config($global_config_hash{'global_config_file'},
+my $start_time = time();
+my $global_config = GlobalConfig->new(%global_config_hash);
+
+if (string_true($global_config->global_config_file)) {
+    my ($hash) = parse_config($global_config->global_config_file,
                               'admins', 'users');
     $hash->{'users'} = { map { /\s*(.*?)\s*--\s*(.*?)\s*--\s*(.*)\s*/;
                                ($1, { full_name => $2, expires => $3 }) }
                          @{$hash->{'users'}} };
     %global_config_hash = (%global_config_hash, %{$hash});
+    $global_config = GlobalConfig->new(%global_config_hash);
 }
 
-chdir $global_config_hash{'working_dir'} or error("$!");
+chdir $global_config->working_dir or
+    die "Can't chdir to working_dir ", $global_config->working_dir, ": $!";
 
-if (exists $global_config_hash{'user_config_file'}) {
-    for (split "\n", slurp $global_config_hash{'user_config_file'}) {
-        my @words = quotewords(",", 0, $_);
-        my $name = $words[$global_config_hash{'user_name_column'}];
-        my $full_name = $words[$global_config_hash{'user_full_name_column'}];
-        my $expires = exists $global_config_hash{'user_expires_column'} ?
-            $words[$global_config_hash{'user_expires_column'}] :
-            'tomorrow';
-        $global_config_hash{'users'}->{$name} =
-        { full_name=>$full_name, expires=>$expires }
-        if defined $name and defined $full_name and defined $expires;
-    }
+if (string_true($global_config->log)) {
+    open(my $LOG, ">>" . $global_config->log) or
+        die "Can't open log ", $global_config->log, ": $!\n";
+    carpout($LOG);
 }
 
-my $global_config = GlobalConfig->new(%global_config_hash);
 $CGI::POST_MAX = $global_config->max_upload_size;
 $ENV{PATH} = $global_config->path;
 my $q = CGI->new;
 die $q->cgi_error() if $q->cgi_error();
+
+warn "remote_user=", $q->remote_user();
+for my $i ($q->param) { warn "param $i=", join(":",$q->param($i)); }
+
+if (string_true($global_config->user_config_file)) {
+    for (split "\n", slurp $global_config->user_config_file) {
+        my @words = quotewords(",", 0, $_);
+        my $name = $words[$global_config->user_name_column];
+        my $full_name = $words[$global_config->user_full_name_column];
+        my $expires = string_true($global_config->user_expires_column) ?
+            $words[$global_config->user_expires_column] : 'tomorrow';
+        if (defined $name and defined $full_name and defined $expires) {
+            $global_config_hash{'users'}->{$name} = {
+                full_name=>$full_name, expires=>$expires };
+        }
+    }
+    $global_config = GlobalConfig->new(%global_config_hash);
+}
 
 ################
 # Parse Inputs
@@ -120,7 +139,7 @@ use constant {
     SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'};
 
 # Complex Inputs
-my ($tainted_remote_user) = $global_config_hash{'remote_user_override'} ||
+my ($tainted_remote_user) = $global_config->remote_user_override ||
     $q->remote_user() =~ /^(\w+)\@/;
 my $remote_user = file($tainted_remote_user);
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
@@ -130,11 +149,11 @@ my @all_users = $is_admin ? sort keys %{$global_config->users} : ($remote_user);
 
 @all_users = map { user($_) } @all_users;
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
-@users = intersect_key(\@all_users, sub {$_[0]->name}, \@users);
+@users = intersect(\@all_users, sub {$_[0]->name}, \@users);
 
 my @all_assignments = list_assignments();
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
-@assignments = intersect_key(\@all_assignments,sub {$_[0]->name},\@assignments);
+@assignments = intersect(\@all_assignments, sub {$_[0]->name}, \@assignments);
 @assignments = grep { due() ne DUE_FUTURE and $_->due le $now or
                           due() ne DUE_PAST and $_->due gt $now} @assignments;
 
@@ -148,7 +167,7 @@ my @files = $q->upload(FILE);
 error('Malformed remote user "' . $tainted_remote_user . '".',
       "Missing .htaccess?") unless $remote_user;
 error("No such user: $remote_user")
-    unless %{$global_config->users->{$remote_user}};
+    unless defined $global_config->users->{$remote_user};
 error("Access for $remote_user expired as of ", user($remote_user)->expires)
     unless $now lt date(user($remote_user)->expires);
 
@@ -166,7 +185,7 @@ sub error {
     say $q->start_html(-title=>$global_config->title . ": Error");
     say $q->h1($global_config->title . ": Error");
     my ($package, $filename, $line) = caller;
-    say $q->p([@_, "(At line $line.)", "Go back and try again."]);
+    say $q->p([@_, "(At line $line and time: ".$now.")"]);
     exit 0;
 }
 
@@ -283,46 +302,33 @@ EOT
     say $q->h3("... or", href(form_url(DO_SEARCH(), 1), "Search"));
     if (do_search()) {
         say $q->start_form(-action=>'#', -method=>'GET');
-        say $q->start_table({-class=>'search'});
         say $q->hidden(-name=>DO_SEARCH(), -default=>1);
         say $q->hidden(-name=>DO_RESULTS(), -default=>1);
+        say $q->start_table({-class=>'search'});
         map { say row(0, 1, @$_) } (
             ["User:", multilist(USERS, map {$_->name} @all_users)],
             ["Assignment:", multilist(ASSIGNMENTS,
                                       map {$_->name} @all_assignments)],
-            ["Show:",
-             boxes(ONLY_LATEST(), only_latest(), 'Only Most Recent',
-                   DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form',
-                   DO_TESTS(), do_tests(), 'Test results')],
+            ["Show:", boxes([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
+                            [DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form'],
+                            [DO_TESTS(), do_tests(), 'Test results'])],
             ["", $q->submit(-value=>"Search")],
             ["","&nbsp;"],
             ["<b>Advanced</b>", ""],
             ["Start date: ", $q->textfield(-name=>START_DATE(), -value=>'Any')],
             ["End date: ", $q->textfield(-name=>END_DATE(), -value=>'Any')],
-            ["Status:",
-             scalar($q->radio_group(
-                        -columns=>1, -name=>SUBMITTED(),
-                        -default=>[SUBMITTED_ANY],
-                        -values=>[SUBMITTED_ANY, SUBMITTED_YES, SUBMITTED_NO],
-                        -labels=>{SUBMITTED_ANY, "Any",
-                                  SUBMITTED_YES, "Submitted",
-                                  SUBMITTED_NO, "Unsubmitted"}))],
-            ["Due:",
-             scalar($q->radio_group(
-                        -columns=>1, -name=>DUE(),
-                        -default=>[DUE_ANY],
-                        -values=>[DUE_ANY, DUE_PAST, DUE_FUTURE],
-                        -labels=>{DUE_ANY, "Any",
-                                  DUE_PAST, "Past",
-                                  DUE_FUTURE, "Future"}))],
-            ["Sort by: ",
-             scalar($q->radio_group(
-                        -columns=>1, -name=>SORT_BY(),
-                        -default=>[SORT_ASSIGNMENT],
-                        -values=>[SORT_ASSIGNMENT, SORT_USER, SORT_DATE],
-                        -labels=>{SORT_ASSIGNMENT, "Assignment",
-                                  SORT_USER, "User",
-                                  SORT_DATE, "Date"}))],
+            ["Status:", radio(SUBMITTED(), 0,
+                              [SUBMITTED_ANY, "Any"],
+                              [SUBMITTED_YES, "Submitted"],
+                              [SUBMITTED_NO, "Unsubmitted"])],
+            ["Due:", radio(DUE(), 0,
+                           [DUE_ANY, "Any"],
+                           [DUE_PAST, "Past"],
+                           [DUE_FUTURE, "Future"])],
+            ["Sort by: ", radio(SORT_BY(), 0,
+                                [SORT_ASSIGNMENT, "Assignment"],
+                                [SORT_USER, "User"],
+                                [SORT_DATE, "Date"])],
             ["", $q->submit(-value=>"Search")]);
         say $q->end_table();
         say $q->end_form();
@@ -407,7 +413,9 @@ EOT
     say $q->end_div();
 
     say $q->p({-class=>'footer'}, "Completed in",
-              sprintf("%0.3f", time() - $start_time), "seconds.");
+              sprintf("%0.3f", time() - $start_time), "seconds by",
+              $q->a({-href=>'http://www.cs.indiana.edu/~adamsmd/projects/tiro/'},
+                   "Tiro") . ".");
     say $q->end_html();
 }
 
@@ -428,16 +436,16 @@ sub list_assignments {
               my @dates = map {[list_dates($path, $_->name, 1)]} @all_users;
               my @all_dates = map {@$_} @dates;
               AssignmentConfig->new(
-                  name=> $name,
+                  name=> $name, text=> $body,
                   num_done=> (true {@$_} @dates),
                   on_time=> (any {$_ le $hash->{'due'}} @all_dates),
-                  text=>$body,
                   %{$hash});
           }
-    }
-    dir_list($global_config->assignment_configs);
+    } dir_list($global_config->assignment_configs);
 }
+
 sub user { UserConfig->new(name => $_[0], %{$global_config->users->{$_[0]}}) }
+
 sub list_dates {
     my ($assignment, $user, $all) = @_;
     my @dates = map { date $_ } dir_list(
@@ -448,14 +456,15 @@ sub list_dates {
     @dates = ($dates[$#dates]) if !$all and $#dates != -1 and only_latest();    
     return @dates;
 }
+
 sub list_files {
     my ($assignment, $user, $date) = @_;
-    map {FileInfo->new(name=>$_,
-                       size=>-s filename(
-                           $assignment->name,$user->name,$date,$_))}
-    dir_list($global_config->assignment_uploads,
-             $assignment->name, $user->name, $date);
+    my @names = dir_list($global_config->assignment_uploads,
+                         $assignment->name, $user->name, $date);
+    map { FileInfo->new(name=>$_, size=>-s filename(
+                            $assignment->name,$user->name,$date,$_)) } @names;
 }
+
 sub filename { catfile($global_config->assignment_uploads, @_); }
 
 ################
@@ -473,28 +482,44 @@ sub define_param {
 }
 
 sub pretty_date { UnixDate($_[0], $global_config->date_format) }
+
 sub form_url { my %args = @_; "?" . join "&", map {"$_=$args{$_}"} keys %args }
+
 sub href { my ($href, @rest) = @_; $q->a({-href=>$href}, @rest); }
-sub multilist { $q->scrolling_list(
-                    -name=>$_[0], -multiple=>1, -size=>5,
-                    -values=>[@_[1..$#_]], -default=>[@_[1..$#_]]); }
-sub boxes { my ($name, $value, $label, @rest) = @_;
-            $q->checkbox($name, $value, 'on', $label) .
-                (@rest ? $q->br() . boxes(@rest) : ""); }
-sub row { my ($pre, $span, @data) = @_;
-          $q->Tr(($pre ? $q->td({-colspan=>$pre}) : ()),
-                 $q->td({-colspan=>$span}, [@data])) }
-sub multirow { my ($prefix, @rows) = @_;
-               "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
-                   join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>"; }
+
+sub multilist {
+    $q->scrolling_list(-name=>$_[0], -multiple=>1, -size=>5,
+                       -values=>[@_[1..$#_]], -default=>[@_[1..$#_]]);
+}
+
+sub boxes {
+    join $q->br(), map { $q->checkbox($_->[0], $_->[1], 'on', $_->[2]) } @_;
+}
+
+sub radio {
+    my ($name, $def, @rest) = @_;
+    scalar($q->radio_group(-columns=>1, -name=>$name, -default=>$rest[$def][0],
+                           -values=>[map { $_->[0] } @rest],
+                           -labels=>{map { @$_ } @rest}));
+}
+
+sub row {
+    my ($pre, $span, @data) = @_;
+    $q->Tr(($pre ? $q->td({-colspan=>$pre}) : ()),
+           $q->td({-colspan=>$span}, [@data]))
+}
+
+sub multirow {
+    my ($prefix, @rows) = @_;
+    "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
+        join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>";
+}
 
 ################
 # General Utils
 ################
 
-sub intersect { my %a = map {($_,1)} @{$_[0]}; grep {$a{$_}} @{$_[1]} }
-
-sub intersect_key {
+sub intersect {
     my ($list1, $fun, $list2) = @_;
     my %a = map {($_,1)} @{$_[2]};
     sort {&$fun($a) cmp &$fun($b)} grep {$a{$_[1]->($_)}} @{$_[0]}
