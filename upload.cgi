@@ -28,6 +28,22 @@ my %global_config_hash = (
   log => 'log.txt',
   );
 
+# table: username # -- title Title -- tests Run<br>Tests -- ...
+
+# group: Labs -- Extra
+# tests: admin_only error_only -- Always Fail -- perl -e "exit 1"
+# tests: Always Fail -- admin_only error_only -- perl -e "exit 1"
+
+# tests: -- Always Fail -- perl -e "exit 1"
+# tests: Always Fail -- -- perl -e "exit 1"
+
+# Confirmation responce
+# Oldest vs Newest First
+# Custom Assignment Order
+
+# Default Test
+# Alternate Heierachry vis Soft Links
+
 # Modules from Core
 use CGI qw/-private_tempfiles -nosticky/;
 use CGI::Carp qw/carpout/;
@@ -57,7 +73,7 @@ struct GlobalConfig=>{
   date_format=>'$', users=>'*%', working_dir=>'$', log=>'$'};
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
-  name=>'$', dates=>'@', title=>'$', text=>'$',
+  name=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', file_count=>'$', tests=>'@'};
 struct Row=>{
   assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
@@ -146,7 +162,7 @@ my ($tainted_remote_user) = $global_config->remote_user_override ||
 my $remote_user = file($tainted_remote_user);
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
-use constant {USERS => "users", ASSIGNMENTS => "assignments",  FILE => 'file' };
+use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
 my @all_users = $is_admin ? sort keys %{$global_config->users} : ($remote_user);
 
 @all_users = map { user($_) } @all_users;
@@ -154,10 +170,14 @@ my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect(\@all_users, sub {$_[0]->name}, \@users);
 
 my @all_assignments = list_assignments();
+@all_assignments =
+  grep { $is_admin or $_->hidden_until le $now } @all_assignments;
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->name}, \@assignments);
-@assignments = grep { due() ne DUE_FUTURE and $_->due le $now or
-                        due() ne DUE_PAST and $_->due gt $now} @assignments;
+@assignments = grep {
+  due() ne DUE_FUTURE and (!string_true($_->due) or $_->due le $now) or
+    due() ne DUE_PAST and (!string_true($_->due) or $_->due gt $now)
+  }@assignments;
 
 my $file = file $q->param(FILE);
 my @files = $q->upload(FILE);
@@ -302,6 +322,11 @@ EOT
             ($late ? "&nbsp;Late" : ""));
     say row(0, 2, $q->small("&nbsp;&nbsp;Due ".pretty_date($assignment->due)))
       if string_true($assignment->due);
+    say row(0, 2, $q->small({-style=>'color:red;'},
+                            "&nbsp;&nbsp;Hidden until ".
+                            pretty_date($assignment->hidden_until)))
+      if string_true($assignment->hidden_until) and
+      $assignment->hidden_until gt $now;
   }
   say $q->end_table();
 
@@ -314,7 +339,7 @@ EOT
     map { say row(0, 1, @$_) } (
       ["User:", multilist(USERS, map {$_->name} @all_users)],
       ["Assignment:", multilist(ASSIGNMENTS,
-                                map {$_->name} @all_assignments)],
+                                map { $_->name } @all_assignments)],
       ["Show:", boxes([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
                       [DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form'],
                       [DO_TESTS(), do_tests(), 'Test results'])],
@@ -346,22 +371,27 @@ EOT
     foreach my $assignment (@assignments) {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($assignment->name . ": ", $assignment->title);
-      say $q->h4("Due by ", pretty_date($assignment->due));
+      say $q->h4("Due by ", pretty_date($assignment->due))
+        if string_true($assignment->due);
       say $q->div(scalar(slurp(catfile($global_config->assignment_configs,
                                        $assignment->text_file))))
-        if defined $assignment->text_file;
-      say $q->div($assignment->text) if defined $assignment->text;
+        if string_true($assignment->text_file);
+      say $q->div($assignment->text)
+        if string_true($assignment->text);
 
-      say $q->start_form(-method=>'POST', -enctype=>&CGI::MULTIPART,
-                         -action=>'#');
-      say $q->hidden(-name=>ASSIGNMENTS, -value=>$assignment->name,
-                     -override=>1);
-      say $q->hidden(-name=>DO_TESTS(), -value=>1, -override=>1);
-      say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
-        for (1..$assignment->file_count);
-      say $q->p($q->submit(DO_UPLOAD(), "Upload files"))
-        if $assignment->file_count;
-      say $q->end_form();
+      if (string_true($assignment->file_count)) {
+        say $q->start_form(-method=>'POST', -enctype=>&CGI::MULTIPART,
+                           -action=>'#');
+        say $q->hidden(-name=>ASSIGNMENTS, -value=>$assignment->name,
+                       -override=>1);
+        say $q->hidden(-name=>DO_TESTS(), -value=>1, -override=>1);
+        say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
+          for (1..$assignment->file_count);
+        say $q->p($q->submit(DO_UPLOAD(), "Upload files"))
+          if $assignment->file_count;
+        say $q->end_form();
+      }
+      say $q->p(); # Add extra space before the final line
       say $q->end_div();
     }
   }
@@ -438,6 +468,7 @@ sub list_assignments {
           $hash->{'tests'} =
             [map {[/^(.*?)\s*--\s*(.*)$/]} @{$hash->{'tests'}}];
           $hash->{'due'} = date($hash->{'due'});
+          $hash->{'hidden_until'} = date($hash->{'hidden_until'});
           AssignmentConfig->new(
             name=> $name, text=> $body,
             dates=> [map {[list_dates($path, $_->name, 1)]} @all_users],
