@@ -5,6 +5,14 @@ Changes:
   global_config_hash is where you can place configs
 
 
+# group: Labs -- Extra
+
+# Upload confirmation
+# Oldest vs Newest First
+# Custom Assignment Order
+
+# Alternate Heierachry via Soft Links
+
 # TODO:
 # - Print "(no assignments)"
 # - Fix strange formatting when blank config file

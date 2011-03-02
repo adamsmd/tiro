@@ -3,46 +3,33 @@ use warnings; # Full warnings
 use strict; # Strict error checking
 $|++; # Unbuffer stdout
 umask 0077; # Default to private files
+delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)}; # Make %ENV safer
 
 # Configuration
 my %global_config_hash = (
   global_config_file=>"/u-/adamsmd/projects/upload/demo/global_config.json",
   working_dir=>"/u-/adamsmd/projects/upload/demo",
 
-  remote_user_override => 'user1',
-
-  assignment_configs => 'folder_configs',
-  assignment_configs_regex => qr[^(\w+)$],
-  assignment_uploads => 'folder_files',
-
+  # General Configurations
   title => 'Assignment Upload Demo',
   path => '/usr/bin',
   max_upload_size => 10000,
   date_format => '%a, %b %d %Y, %r',
+  log => 'log.txt',
 
+  # Assignment Configurations
+  assignment_configs => 'folder_configs',
+  assignment_configs_regex => qr[^(\w+)$],
+  assignment_uploads => 'folder_files',
+
+  # User Configurations
   admins => ['adamsmd', 'user1'],
+  remote_user_override => 'user1',
   users => { user5 => { full_name => 'User Five', expires=>'Jan 1, 2100'} },
   user_config_file=>"user_config_file.csv",
   user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
-
-  log => 'log.txt',
+  user_line_skip=>1,
   );
-
-# table: username # -- title Title -- tests Run<br>Tests -- ...
-
-# group: Labs -- Extra
-# tests: admin_only error_only -- Always Fail -- perl -e "exit 1"
-# tests: Always Fail -- admin_only error_only -- perl -e "exit 1"
-
-# tests: -- Always Fail -- perl -e "exit 1"
-# tests: Always Fail -- -- perl -e "exit 1"
-
-# Upload confirmation
-# Oldest vs Newest First
-# Custom Assignment Order
-
-# Default Test
-# Alternate Heierachry vis Soft Links
 
 # Modules from Core
 use CGI qw/-private_tempfiles -nosticky/;
@@ -66,15 +53,16 @@ use List::MoreUtils ':all';
 
 # Structs
 struct GlobalConfig=>{
-  global_config_file=>'$', user_config_file=>'$', remote_user_override=>'$',
+  global_config_file=>'$', working_dir=>'$', title=>'$', path=>'$',
+  max_upload_size=>'$', date_format=>'$', log=>'$', assignment_configs=>'$',
+  assignment_configs_regex=>'$', assignment_uploads=>'$', admins=>'*@',
+  remote_user_override=>'$', users=>'*%', user_config_file=>'$',
   user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
-  title=>'$', admins=>'*@', assignment_configs=>'$', assignment_uploads=>'$',
-  assignment_configs_regex=>'$', path=>'$', max_upload_size=>'$',
-  date_format=>'$', users=>'*%', working_dir=>'$', log=>'$'};
+  user_line_skip=>'$', text=>'$' };
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
-  name=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
-  text_file=>'$', due=>'$', file_count=>'$', tests=>'@'};
+  name=>'$', path=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
+  text_file=>'$', due=>'$', file_count=>'$', validators=>'@'};
 struct Row=>{
   assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
 struct FileInfo=>{name=>'$', size=>'$'};
@@ -89,8 +77,8 @@ my $start_time = time();
 my $global_config = GlobalConfig->new(%global_config_hash);
 
 if (string_true($global_config->global_config_file)) {
-  my ($hash) = parse_config($global_config->global_config_file,
-                            'admins', 'users');
+  my $hash = parse_config($global_config->global_config_file,
+                          'text', 'admins', 'users');
   $hash->{'users'} = { map { /\s*(.*?)\s*--\s*(.*?)\s*--\s*(.*)\s*/;
                              ($1, { full_name => $2, expires => $3 }) }
                        @{$hash->{'users'}} };
@@ -108,18 +96,17 @@ if (string_true($global_config->log)) {
 }
 
 $CGI::POST_MAX = $global_config->max_upload_size;
-delete @ENV{qw(IFS CDPATH ENV BASH_ENV)};   # Make %ENV safer
 $ENV{PATH} = $global_config->path;
 my $q = CGI->new;
 die $q->cgi_error() if $q->cgi_error();
 
-warn "remote_user=", $q->remote_user();
-warn "remote_host=", $q->remote_host();
-warn "referer=", $q->referer();
-for my $i ($q->param) { warn "param $i=", join(":",$q->param($i)); }
+exists $ENV{$_} and warn "$_: ", $ENV{$_} for
+  ("REMOTE_HOST", "REMOTE_USER", "HTTP_REFERER", "HTTP_X_FORWARDED_FOR");
+warn "Param $_: ", join(":",$q->param($_)) for $q->param();
 
 if (string_true($global_config->user_config_file)) {
-  for (split "\n", slurp $global_config->user_config_file) {
+  for (drop($global_config->user_line_skip || 0,
+            split("\n", slurp $global_config->user_config_file))) {
     my @words = quotewords(",", 0, $_);
     my $name = $words[$global_config->user_name_column];
     my $full_name = $words[$global_config->user_full_name_column];
@@ -148,14 +135,14 @@ my $now = date "now";
 define_param(start_date => \&date, end_date => \&date);
 define_param(do_search => \&bool, do_download => \&bool, do_upload => \&bool,
              do_upload_form => \&bool, do_results => \&bool);
-define_param(only_latest => \&bool, do_tests => \&bool);
+define_param(only_latest => \&bool, do_validation => \&bool);
 define_param(submitted => \&keyword, due => \&keyword);
 use constant {SUBMITTED_YES=>"submitted", SUBMITTED_NO=>"unsubmitted",
               SUBMITTED_ANY=>"any"};
-use constant {DUE_PAST=>'past',DUE_FUTURE=>'future',DUE_ANY=>'any'};
+use constant {DUE_PAST=>'past', DUE_FUTURE=>'future', DUE_ANY=>'any'};
 define_param(sort_by => \&keyword);
 use constant {
-  SORT_ASSIGNMENT=>'assignment',SORT_USER=>'user',SORT_DATE=>'date'};
+    SORT_ASSIGNMENT=>'assignment', SORT_USER=>'user', SORT_DATE=>'date'};
 
 # Complex Inputs
 my ($tainted_remote_user) = $global_config->remote_user_override ||
@@ -164,7 +151,7 @@ my $remote_user = file($tainted_remote_user);
 my $is_admin = any { $_ eq $remote_user } @{$global_config->admins};
 
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
-my @all_users = $is_admin ? sort keys %{$global_config->users} : ($remote_user);
+my @all_users = $is_admin?sort keys %{$global_config->users}:($remote_user);
 
 @all_users = map { user($_) } @all_users;
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
@@ -172,7 +159,7 @@ my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 
 my @all_assignments = list_assignments();
 @all_assignments =
-  grep { $is_admin or $_->hidden_until le $now } @all_assignments;
+  grep { $is_admin or ($_->hidden_until || "") le $now } @all_assignments;
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->name}, \@assignments);
 @assignments = grep {
@@ -240,11 +227,11 @@ sub upload {
       error("Can't save $name in @{[$assignment->name]} " .
             "for $remote_user at $now: $!");
   }
-  print $q->redirect(-status=>303, # HTTP_SEE_OTHER
-                     -uri=>form_url(DO_RESULTS(), 1, DO_TESTS(), do_tests(),
-                                    ASSIGNMENTS, $assignment->name,
-                                    USERS, $remote_user,
-                                    START_DATE(), $now, END_DATE(), $now));
+  print $q->redirect(
+      -status=>303, # HTTP_SEE_OTHER
+      -uri=>form_url(DO_RESULTS(), 1, DO_VALIDATION(), do_validation(),
+                     ASSIGNMENTS, $assignment->name, USERS, $remote_user,
+                     START_DATE(), $now, END_DATE(), $now));
 }
 
 sub search_results {
@@ -277,34 +264,31 @@ sub render {
   print $q->header();
   say $q->start_html(-title=>$global_config->title,
                      -style=>{-verbatim=><<'EOT'});
-  h1 a { text-decoration:none;color:WindowText; }
   th { vertical-align:top; text-align:left; }
   td { vertical-align:top; }
   h2 { border-bottom:2px solid black; }
   .navbar { padding:0.3em; width:19em; float:left; border:solid black 1px; }
   .navbar td { vertical-align: baseline; }
   .navbar form td { vertical-align: top; }
-  .navbar > h3:first-child { margin-top:0; } /* Stop spurious margin */
+  .navbar>h3:first-child { margin-top:0; } /* Stop spurious margin */
   .search { width:100%; }
   .search select { width:100%; }
   .search input[type="text"] { width:90%; }
   .results { width:100%;border-collapse: collapse; }
   .results>thead { border-bottom:2px solid black; }
   .results>tbody { border-bottom:1px solid black; }
-  .results>tbody>TR:first-child>td+td+td+td+td+td+td+td { text-align:right; }
+  .results>tbody>TR:first-child>td+td+td+td+td+td+td { text-align:right; }
   .results>tbody>TR+TR>td+td { text-align:right; }
   .results>tbody>TR+TR>td+td[colspan] { text-align:left; }
-/*  .results tbody TR+TR td+td[colspan] { text-align:left; } */
-/*  .results tbody TR td[colspan="1"]+td { background:rgb(95%,95%,95%);} */
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
   .body { margin-left:21em; }
   .footer { clear:left; text-align:right; font-size: small; }
   .welcome { float:right; font-weight:bold; }
 EOT
 
-    say $q->div({-class=>'welcome'},
-                "Welcome $remote_user<br>Current time is", pretty_date($now));
-  say $q->h1(href(form_url(), $global_config->title));
+  say $q->div({-class=>'welcome'},
+              "Welcome $remote_user<br>Current time is", pretty_date($now));
+  say $q->h1($global_config->title);
 
   say $q->start_div({-class=>'navbar'});
 
@@ -327,10 +311,11 @@ EOT
     say row(0, 2, $q->small({-style=>'color:red;'},
                             "&nbsp;&nbsp;Hidden until ".
                             pretty_date($assignment->hidden_until)))
-      if string_true($assignment->hidden_until) and
-      $assignment->hidden_until gt $now;
+      if ($assignment->hidden_until || "") gt $now;
   }
   say $q->end_table();
+
+  say $q->h3("... or", href(form_url(), "Start Over"));
 
   say $q->h3("... or", href(form_url(DO_SEARCH(), 1), "Search"));
   if (do_search()) {
@@ -344,7 +329,7 @@ EOT
                                 map { $_->name } @all_assignments)],
       ["Show:", boxes([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
                       [DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form'],
-                      [DO_TESTS(), do_tests(), 'Test results'])],
+                      [DO_VALIDATION(), do_validation(), 'Validation Result'])],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
       ["<b>Advanced</b>", ""],
@@ -386,7 +371,7 @@ EOT
                            -action=>'#');
         say $q->hidden(-name=>ASSIGNMENTS, -value=>$assignment->name,
                        -override=>1);
-        say $q->hidden(-name=>DO_TESTS(), -value=>1, -override=>1);
+        say $q->hidden(-name=>DO_VALIDATION(), -value=>1, -override=>1);
         say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
           for (1..$assignment->file_count);
         say $q->p($q->submit(DO_UPLOAD(), "Upload files"))
@@ -400,74 +385,55 @@ EOT
 
   if (do_results()) {
     say $q->start_table({-class=>'results'});
-    say $q->thead(
-      $q->Tr($q->th(["#", "Title", "User"," Name", "Date",
-                     "Run<br/>Tests", "Files", "Size<br/>(bytes)"])));
+    say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name", "Validation",
+                                 "Files", "Bytes"])));
     if (not @rows) {
-      say row(0, 8, $q->center('No results to display.',
+      say row(0, 7, $q->center('No results to display.',
                                'Browse or search to select assignment.'));
     } else {
       foreach my $row (@rows) {
         say $q->start_tbody();
-        my @url = (ASSIGNMENTS, $row->assignment->name,
-                   USERS, $row->user->name,
+        my @url = (ASSIGNMENTS, $row->assignment->name, USERS, $row->user->name,
                    START_DATE(), $row->date, END_DATE(), $row->date);
         my @file_rows = @{$row->files} ?
           map {[href(form_url(@url, DO_DOWNLOAD(), 1, FILE, $_->name),
                      $_->name),
                 $_->size] } @{$row->files} : ["(No files)", ""];
-        my $test = form_url(@url, DO_TESTS(), 1, DO_RESULTS(), 1);
-        say multirow([$row->assignment->name, $row->assignment->title,
-                      $row->user->name, $row->user->full_name,
-                      ($row->date ? (pretty_date($row->date),
-                                     @{$row->assignment->tests} ?
-                                     href($test, "Run") :
-                                     "(No tests)") :
-                       ("(No uploads)", ""))], @file_rows);
+        say multirow([
+            $row->assignment->name, $row->assignment->title,
+            $row->user->name, $row->user->full_name,
+            ($row->date ?
+             (href(form_url(@url, DO_VALIDATION(), 1, DO_RESULTS(), 1),
+                   pretty_date($row->date))) :
+             ("(Nothing submitted)"))], @file_rows);
 
-        if (do_tests() and $row->date) {
-#          my @tests = @{$row->assignment->tests};
-#          my $len = @tests;
-          $ENV{'TIRO_SUBMISSION'} = filename(
-            $row->assignment->name, $row->user->name, $row->date);
-          for my $hook (@{$row->assignment->tests}) {
-            say "<tr><td></td><td colspan=7><div>";
-            system $hook;
-            say "</div></td></tr>";
+        if (do_validation() and $row->date) {
+          if (not @{$row->assignment->validators}) {
+            say '<tr><td></td><td colspan=7 style="background:rgb(95%,95%,95%);">';
+            say "Submission received on @{[pretty_date($row->date)]}.";
+            say '</td></tr>';
+          } else {
+            $ENV{'TIRO_SUBMISSION'} = filename(
+              $row->assignment->name, $row->user->name, $row->date);
+            $ENV{'TIRO_ASSIGNMENT'} = catfile(
+              $global_config->assignment_configs, $row->assignment->path);
+            for my $validator (@{$row->assignment->validators}) {
+              say "<tr><td></td><td colspan=7><div>";
+              warn "Running: $validator";
+              system $validator;
+              warn "Exit code: $?";
+              say "</div></td></tr>";
+            }
           }
-#          my $passed = 0;
-#          for my $i (0..$#tests) {
-#            say $q->start_Tr(), $q->td({-colspan=>1}, "");
-#            say $q->start_td({-colspan=>7}), $q->start_div();
-##            system $cmd;
-#            die $! if $? == -1; # TODO: check on this
-#            say $q->end_div(), $q->end_td(), $q->end_Tr();
-
-#            my ($name, $cmd) = @{$tests[$i]};
-#            say row(1, 7, "Running $name (test @{[$i+1]} of $len)");
-#            say $q->start_Tr(), $q->td({-colspan=>2}, "");
-#            say $q->start_td({-colspan=>6}), $q->start_div();
-#            system $cmd;
-#            die $! if $? == -1;
-#            say $q->end_div(), $q->end_td(), $q->end_Tr();
-#            say row(2, 6, $? ? 'Failed' : 'Passed');
-#            $passed++ if $?;
-#          }
-#          my $passed = true {$_ == 0} pairwise
-#          { say row(1, 7, "Running @{[$b->[0]]} (test $a of $len)");
-#            say $q->start_Tr(), $q->td({-colspan=>2}, "");
-#            say $q->start_td({-colspan=>6}), $q->start_div();
-#            system $b->[1];
-#            die $! if $? == -1;
-#            say $q->end_div(), $q->end_td(), $q->end_Tr();
-#            say row(2, 6, $? ? 'Failed' : 'Passed');
-#            $? } @indexes, @tests;
-          #say row(1, 7, @tests ? "Passed $passed of $len tests" : "(No tests)");
         }
         say $q->end_tbody();
       }
     }
     say $q->end_table();
+  }
+
+  if (not do_upload_form() and not do_results()) {
+    say $global_config->text;
   }
   say $q->end_div();
 
@@ -487,16 +453,14 @@ sub list_assignments {
         my ($name) = /@{[$global_config->assignment_configs_regex]}/;
         if (not defined $name) { (); }
         else {
-          my ($hash, $body) = parse_config(
-            catfile($global_config->assignment_configs, $path), 'tests');
-#          $hash->{'tests'} =
-#            [map {[/^(.*?)\s*--\s*(.*)$/]} @{$hash->{'tests'}}];
+          my $hash = parse_config(
+            catfile($global_config->assignment_configs, $path),
+            'text', 'validators');
           $hash->{'due'} = date($hash->{'due'});
           $hash->{'hidden_until'} = date($hash->{'hidden_until'});
           AssignmentConfig->new(
-            name=> $name, text=> $body,
             dates=> [map {[list_dates($path, $_->name, 1)]} @all_users],
-            %{$hash});
+            name=> $name, path=> $path, %{$hash});
         }
   } dir_list($global_config->assignment_configs);
 }
@@ -576,6 +540,8 @@ sub multirow {
 # General Utils
 ################
 
+sub drop { @_[$_[0]+1..$#_] }
+
 sub intersect {
   my ($list1, $fun, $list2) = @_;
   my %a = map {($_,1)} @{$_[2]};
@@ -590,9 +556,8 @@ sub dir_list {
 }
 
 sub parse_config {
-  my ($filename, @lists) = @_;
-  my ($lines, $body) = slurp($filename) =~ /^(.*?)\n\n(.*)$/s;
-  $lines =~ s/^\s*#.*$//m; # Remove comments
+  my ($filename, $body_name, @lists) = @_;
+  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n(.*))?$/s;
   my %hash = map { ($_, []) } @lists;
   for (split "\n", $lines) {
     my ($key, $value) = /^\s*([^:]*?)\s*:\s*(.*?)\s*$/;
@@ -604,5 +569,7 @@ sub parse_config {
       }
     }
   }
-  return (\%hash, $body);
+  $hash{$body_name} =
+    ($hash{$body_name} || "") . (($body || "") =~ /\S/ ? $body : "");
+  return \%hash;
 }
