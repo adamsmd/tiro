@@ -53,22 +53,21 @@ use List::MoreUtils qw/:all/;
 ################
 
 # Structs
-struct GlobalConfig=>{
+struct Config=>{
   config_file=>'$', working_dir=>'$', title=>'$', path=>'$',
   max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
   user_override=>'$', users=>'*%', users_file=>'$',
   user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
   users_header_lines=>'$', text=>'$' };
-struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
-struct AssignmentConfig=>{
+struct User=>{name => '$', full_name => '$', expires => '$'};
+struct Assignment=>{
   name=>'$', path=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', file_count=>'$', validators=>'@'};
-struct Row=>{
-  assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
-struct FileInfo=>{name=>'$', size=>'$'};
+struct Row=>{assignment=>'Assignment', user=>'User', date=>'$', files=>'@'};
+struct File=>{name=>'$', size=>'$'};
 
-defined $config->{$_} or $config->{$_} = ""
+defined $config_hash{$_} or $config_hash{$_} = ""
   for ('config_file', 'log_file', 'users_file', 'user_expires_column');
 
 ################
@@ -76,7 +75,7 @@ defined $config->{$_} or $config->{$_} = ""
 ################
 
 my $start_time = time();
-my $config = GlobalConfig->new(%config_hash);
+my $config = Config->new(%config_hash);
 
 if ($config->config_file ne "") {
   my $hash = parse_config($config->config_file, 'text', 'admins', 'users');
@@ -84,7 +83,7 @@ if ($config->config_file ne "") {
                              ($1, { full_name => $2, expires => $3 }) }
                        @{$hash->{'users'}} };
   %config_hash = (%config_hash, %{$hash});
-  $config = GlobalConfig->new(%config_hash);
+  $config = Config->new(%config_hash);
 }
 
 chdir $config->working_dir or
@@ -118,7 +117,7 @@ if ($config->users_file ne "") {
         full_name=>$full_name, expires=>$expires };
     }
   }
-  $config = GlobalConfig->new(%config_hash);
+  $config = Config->new(%config_hash);
 }
 
 ################
@@ -307,7 +306,7 @@ EOT
                             pretty_date($assignment->hidden_until)))
       unless $assignment->hidden_until lt $now;
   }
-  say row(0, 1, "(No assignments)") unless @all_assignments;
+  say row(0, 1, "(No assignments yet)") unless @all_assignments;
   say $q->end_table();
 
   say $q->h3("... or", href(form_url(), "Start Over"));
@@ -451,14 +450,14 @@ sub list_assignments {
           $hash->{'hidden_until'} = date($hash->{'hidden_until'});
           defined $hash->{$_} or $hash->{$_} = ""
             for ('due', 'hidden_until', 'text_file', 'text', 'file_count');
-          AssignmentConfig->new(
+          Assignment->new(
             dates=> [map {[list_dates($name, $_->name, 1)]} @all_users],
             name=> $name, path=> $path, %{$hash});
         }
   } dir_list($config->assignments_dir);
 }
 
-sub user { UserConfig->new(name => $_[0], %{$config->users->{$_[0]}}) }
+sub user { User->new(name => $_[0], %{$config->users->{$_[0]}}) }
 
 sub list_dates {
   my ($assignment, $user, $all) = @_;
@@ -475,8 +474,8 @@ sub list_files {
   my ($assignment, $user, $date) = @_;
   my @names = dir_list($config->submissions_dir,
                        $assignment->name, $user->name, $date);
-  map { FileInfo->new(name=>$_, size=>-s filename(
-                        $assignment->name,$user->name,$date,$_)) } @names;
+  map { File->new(name=>$_, size=>-s filename(
+                    $assignment->name,$user->name,$date,$_)) } @names;
 }
 
 sub filename { catfile($config->submissions_dir, @_); }

@@ -1,87 +1,24 @@
-Changes:
-  checks -> tests
-  global_config_file is absolute path
-  DIR is not working_dir and process will cd to there
-  global_config_hash is where you can place configs
+Tiro is named after Macrus Tillius Tiro who was a Roman slave owned by
+Cicero who figures prominently in the early history of the notary
+profession.  The Tiro program is effectively a notarizer of assignment
+submissions.
+
+Macrus Tillius Tiro invented the shorthand system of 'notae
+Tironianae' (Tironian notes).  Originally, a 'notarius' (notary) was
+anyone who used the shorthand system.  The shorthand system allowed
+the recording of statements and meetings in real-time which led
+to the notarii being official record keepers.  Thus the meaning of
+the term 'notarius' shifted to mean an official records keeper or one
+who certifies documents and eventually the modern term, 'notary'.
 
 
-# group: Labs -- Extra
-
-# Upload confirmation
-# Oldest vs Newest First
-# Custom Assignment Order
-
-# Alternate Heierachry via Soft Links
-
-# TODO:
-# - Print "(no assignments)"
-# - Fix strange formatting when blank config file
-# + Per assignment banner should be read from a file.
-# + Consistent date formatting via pp_date (done)
-# - Add color to late submissions
-# + Disable needles check messages
-# - Put submission status next to LHS asst menu
-# - Display all submissions after upload (but not test all)
-#   - Link to show all submissions?
-# - (low) Remove assignment description from search page
-# + TODO: asst vs folder
-# - New path root structure
-# - Variable width left bar
-# - Submitted line
-# + Welcome line
-# + Rename with ASST
-# - Assignment name in search
-# - Missing date in expired
-# - Reformat "no results to display"
-
-Future features:
-* Critical
- - Install guide
- - file_name regex (as validator)
- - config file validator
- - active vs. non-active folders
- - Admin interface (but be clear what it looks like to student)
- - Server Time offset
-
- - Report back search params
- - text/plain on file download (regex)
- - config "Select" and "Folder" text
-   - Change "folder" to "assignment"
-   - Change "browse" to "select"(?)
- - checkers with folder name in the middle
- + folder extension
-
-* Non-critical
- - hilight "overdue" in red or bold
- - Download tar-ball.
- - Folder edit: link under browse?, new (link under browse), delete, active, rename, validate config
- - Hilight sorted column
- - Clickable sorted column
- - file size with commas
-
- - Put "multi-selectable" under Users and Folders search box
-
-* Rejected ideas (unless someone has a good reason to include them)
- - Check box for show upload form
- - select subset of checkers to run
- - detailed sort-by
- - Separate upload page (so full assignment can be listed)
-
-NOTES:
- - if you want to validate filenames, write an external checker
- - group work is possible if you symlink the right assignment folders together
- - Upload chmod for group? (as silent validator?)
 
 Thanks to the testers:
-  TODO
+  Roshan P. James, Suzanne Menzel, Alex Rudnick, Lindsey Kuper,
+  Chris Zakian, Jamie TODO, TODO
 
 
-Avoid Class::Struct
-avoid prototypes
-$_ =~ $foo->bar easier to read than /@{[$foo->bar]}/
-${\$foo->bar}
-File::Spec
-Path::Class
-use Path::Class; dir( $foo )->children
-don't like interleaving code and sub defs
+Tricks:
+ - if you want to validate filenames, write an external checker
+ - group work is possible if you symlink the right assignment folders together
 
