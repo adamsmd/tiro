@@ -1,0 +1,6 @@
+<Files tiro.cgi>
+AuthType KerberosV5
+AuthName "UITS Network ID"
+Require valid-user
+</Files>
+

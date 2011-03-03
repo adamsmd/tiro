@@ -441,7 +441,7 @@ EOT
 
 sub list_assignments {
   map { my $path = $_;
-        my ($name) = /@{[$config->assignments_regex]}/;
+        my ($name) = $_ =~ $config->assignments_regex;
         if (not defined $name) { (); }
         else {
           my $hash = parse_config(catfile($config->assignments_dir, $path),

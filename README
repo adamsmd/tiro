@@ -1,7 +1,18 @@
+Installation
+================================
+TODO
+
+Configuration Format
+================================
+TODO
+
+Why is it named "Tiro"?
+================================
+
 Tiro is named after Macrus Tillius Tiro who was a Roman slave owned by
-Cicero who figures prominently in the early history of the notary
-profession.  The Tiro program is effectively a notarizer of assignment
-submissions.
+Cicero.  He figures prominently in the early history of the notary
+profession which is appropriate given that he Tiro program is
+effectively a notarizer for assignment submissions.
 
 Macrus Tillius Tiro invented the shorthand system of 'notae
 Tironianae' (Tironian notes).  Originally, a 'notarius' (notary) was
@@ -11,14 +22,13 @@ to the notarii being official record keepers.  Thus the meaning of
 the term 'notarius' shifted to mean an official records keeper or one
 who certifies documents and eventually the modern term, 'notary'.
 
-
-
-Thanks to the testers:
+Thanks to the testers
+================================
   Roshan P. James, Suzanne Menzel, Alex Rudnick, Lindsey Kuper,
   Chris Zakian, Jamie TODO, TODO
 
-
-Tricks:
+Tricks
+================================
  - if you want to validate filenames, write an external checker
  - group work is possible if you symlink the right assignment folders together
 
