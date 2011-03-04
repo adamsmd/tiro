@@ -35,3 +35,7 @@ Future features:
    - Link to show all submissions?
  - New path root structure
  - Assignment name in search
+ - What happens if a student spams the system?
+ - Sort by student name, not just username
+ - Default config should comment out or only have universal defaults
+ - Security of H212 tiro submissions

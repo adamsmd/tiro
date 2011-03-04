@@ -8,15 +8,15 @@ delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)}; # Make %ENV safer
 # Configuration
 my %config_hash = (
   # Bootstrap Configurations
-  config_file=>'/u-/adamsmd/projects/upload/demo/config.cfg',
-  working_dir=>'/u-/adamsmd/projects/upload/demo',
+  config_file=>'config/config.cfg',
+  working_dir=>'.',
 
   # General Configurations
-  title => 'Assignment Upload Demo',
+  # title => 'Assignment Submission Demo',
   path => '/usr/bin',
   max_post_size => 10000,
   date_format => '%a, %b %d %Y, %r',
-  log_file => 'log.txt',
+  log_file => 'config/log.txt',
 
   # Assignment Configurations
   assignments_dir => 'assignments',
@@ -24,12 +24,12 @@ my %config_hash = (
   submissions_dir => 'submissions',
 
   # User Configurations
-  admins => ['user1'],
-  user_override => 'user1',
-  users => { user1 => { full_name => 'Demo User #1', expires=>'tomorrow'} },
-  users_file=>"users.csv",
-  user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
-  users_header_lines=>1,
+  #admins => ['user1'],
+  #user_override => 'user1',
+  #users => { user1 => { full_name => 'Demo User #1', expires=>'tomorrow'} },
+  #users_file=>"users.csv",
+  #user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
+  #users_header_lines=>1,
   );
 
 # Modules from Core
@@ -114,7 +114,7 @@ if ($config->users_file ne "") {
       'tomorrow' : $words[$config->user_expires_column];
     if (defined $name and defined $full_name and defined $expires) {
       $config_hash{'users'}->{$name} = {
-        full_name=>$full_name, expires=>$expires };
+        full_name => $full_name, expires => $expires };
     }
   }
   $config = Config->new(%config_hash);
@@ -216,13 +216,16 @@ sub upload {
   my $assignment = $assignments[0] or error("No assignment for upload.");
 
   my $target_dir = filename($assignment->name, $remote_user, $now);
+  warn "Starting upload of $_ in $target_dir" for @files;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->name]} for " .
                                "$remote_user at $now: $!");
   foreach my $file (@files) {
-    copy($file, "$target_dir/@{[file $file]}") or
+    copy($file, catfile($target_dir, file $file)) or
       error("Can't save @{[file $file]} in @{[$assignment->name]} " .
             "for $remote_user at $now: $!");
   }
+  warn "Upload done for $_ (@{[-s catfile($target_dir, $_)]} bytes)" .
+    " in $target_dir" for dir_list($target_dir);
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
       -uri=>form_url(DO_RESULTS(), 1, VALIDATION(), validation(),
@@ -262,6 +265,7 @@ sub render {
   td { vertical-align:top; }
   h2 { border-bottom:2px solid black; }
   .navbar { padding:0.3em; width:19em; float:left; border:solid black 1px; }
+  .navbar table { width:100%; }
   .navbar td { vertical-align: baseline; }
   .navbar form td { vertical-align: top; }
   .navbar>h3:first-child { margin-top:0; } /* Stop spurious margin */
@@ -278,6 +282,7 @@ sub render {
   .body { margin-left:21em; }
   .footer { clear:left; text-align:right; font-size: small; }
   .welcome { float:right; font-weight:bold; }
+  .hidden_until { color:red; }
 EOT
 
   say $q->div({-class=>'welcome'},
@@ -301,7 +306,7 @@ EOT
             ($late ? "&nbsp;Late" : ""));
     say row(0, 2, $q->small("&nbsp;&nbsp;Due " . pretty_date($assignment->due)))
       unless $assignment->due eq "";
-    say row(0, 2, $q->small({-style=>'color:red;'},
+    say row(0, 2, $q->small({-class=>'hidden_until'},
                             "&nbsp;&nbsp;Hidden until " .
                             pretty_date($assignment->hidden_until)))
       unless $assignment->hidden_until lt $now;
@@ -549,7 +554,7 @@ sub dir_list {
 
 sub parse_config {
   my ($filename, $body_name, @lists) = @_;
-  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n(.*))?$/s;
+  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n\s*(.*))?$/s;
   my %hash = map { ($_, []) } @lists;
   for (split "\n", $lines) {
     my ($key, $value) = /^\s*([^:]*?)\s*:\s*(.*?)\s*$/;
@@ -561,7 +566,6 @@ sub parse_config {
       }
     }
   }
-  $hash{$body_name} =
-    ($hash{$body_name} || "") . (($body || "") =~ /\S/ ? $body : "");
+  $hash{$body_name} = ($hash{$body_name} || "") . ($body || "");
   return \%hash;
 }

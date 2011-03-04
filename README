@@ -1,12 +1,40 @@
 Installation
 ================================
+- Copy tiro.cgi to your cgi-pub
+  - Make sure it has group and word execute permissions
+
+- Configure your server to use HTTPS authentication
+  - On most Apache installations this is as simple as editing
+    cgi-pub/.htaccess to contain the following lines and making sure
+    the .htaccess has group and world read permissions:
+      <Files tiro.cgi>
+      AuthType KerberosV5
+      AuthName "UITS Network ID"
+      Require valid-user
+      </Files>
+
+- Configure your installation.  See the Configuration section of this document.
+
 TODO
 
-Configuration Format
+Configuration
 ================================
+There are two places you can put the configuration settings for Tiro
+plus a third place for putting
+
 TODO
 
-Why is it named "Tiro"?
+Tricks
+================================
+ - if you want to validate filenames, write an external checker
+ - group work is possible if you symlink the right assignment folders together
+
+Thanks to the testers
+================================
+  Roshan P. James, Suzanne Menzel, Alex Rudnick, Lindsey Kuper,
+  Chris Zakian, Jamie TODO, TODO
+
+What does the name "Tiro" mean?
 ================================
 
 Tiro is named after Macrus Tillius Tiro who was a Roman slave owned by
@@ -21,14 +49,3 @@ the recording of statements and meetings in real-time which led
 to the notarii being official record keepers.  Thus the meaning of
 the term 'notarius' shifted to mean an official records keeper or one
 who certifies documents and eventually the modern term, 'notary'.
-
-Thanks to the testers
-================================
-  Roshan P. James, Suzanne Menzel, Alex Rudnick, Lindsey Kuper,
-  Chris Zakian, Jamie TODO, TODO
-
-Tricks
-================================
- - if you want to validate filenames, write an external checker
- - group work is possible if you symlink the right assignment folders together
-

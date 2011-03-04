@@ -1,6 +1,5 @@
-<Files tiro.cgi>
+SSLRequireSSL
+#SSLOptions +StrictRequire
 AuthType KerberosV5
 AuthName "UITS Network ID"
 Require valid-user
-</Files>
-
