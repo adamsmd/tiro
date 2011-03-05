@@ -299,8 +299,9 @@ EOT
   foreach my $assignment (@all_assignments) {
     my $num_done = (grep { @$_ } @{$assignment->dates});
     my $num_users = @all_users;
-    my $late = ($assignment->due ne "" and ($now ge $assignment->due)
-                and not (any {$_ le $assignment->due} $assignment->dates));
+    my $late = (
+      $assignment->due ne "" and ($now ge $assignment->due) and
+      all {not any {$_ le $assignment->due} @$_} @{$assignment->dates});
     say row(0, 1, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
                                 ASSIGNMENTS, $assignment->name),
                        $assignment->name . ": ", $assignment->title),
@@ -386,8 +387,8 @@ EOT
 
   if (do_results()) {
     say $q->start_table({-class=>'results'});
-    say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name", "Validation",
-                                 "Files", "Bytes"])));
+    say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
+                                 "Validation", "Files", "Bytes"])));
     if (not @rows) {
       say row(0, 7, $q->center('No results to display.',
                                'Browse or search to select assignment.'));
@@ -403,7 +404,8 @@ EOT
                       $row->user->name, $row->user->full_name,
                       ($row->date ?
                        (href(form_url(@url, VALIDATION(), 1, DO_RESULTS(), 1),
-                             pretty_date($row->date))) :
+                             pretty_date($row->date)) .
+                        ($row->date gt $row->assignment->due ? " (Late)" : "")) :
                        ("(Nothing submitted)"))], @file_rows);
 
         if (validation() and $row->date) {
@@ -455,8 +457,7 @@ sub list_assignments {
         else {
           my $hash = parse_config(catfile($config->assignments_dir, $path),
                                   'text', 'validators');
-          $hash->{'due'} = date($hash->{'due'});
-          $hash->{'hidden_until'} = date($hash->{'hidden_until'});
+          $hash->{$_} = date($hash->{$_}) for ('due', 'hidden_until');
           defined $hash->{$_} or $hash->{$_} = ""
             for ('due', 'hidden_until', 'text_file', 'text', 'file_count');
           Assignment->new(
