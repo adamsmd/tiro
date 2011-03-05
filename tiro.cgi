@@ -127,7 +127,7 @@ if ($config->users_file ne "") {
 # Input formats
 sub date { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
 sub file { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
-sub keyword { (($_[0] or "") =~ qr/^([A-Za-z0-9]*)/)[0]; }
+sub keyword { (($_[0] or "") =~ qr/^([A-Za-z0-9_]*)/)[0]; }
 sub bool { $_[0] ? 1 : 0; }
 
 # Basic Inputs
@@ -141,7 +141,8 @@ define_param(
 use constant {
   SUBMITTED_YES=>"sub_yes", SUBMITTED_NO=>"sub_no", SUBMITTED_ANY=>"sub_any",
   DUE_PAST=>'due_past', DUE_FUTURE=>'due_future', DUE_ANY=>'due_any',
-  SORT_ASSIGNMENT=>'s_assignment', SORT_USER=>'s_user', SORT_DATE=>'s_date'};
+  SORT_ASSIGNMENT=>'sort_assignment', SORT_USER=>'sort_user',
+  SORT_DATE=>'sort_date', SORT_FULL_NAME=>'sort_full_name'};
 
 # Complex Inputs
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
@@ -251,6 +252,8 @@ sub search_results {
 
   return sort {(sort_by() eq SORT_USER and $a->user->name cmp $b->user->name)
                  or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
+                 or (sort_by() eq SORT_FULL_NAME
+                     and $a->user->full_name cmp $b->user->full_name)
                  or ($a->assignment->name cmp $b->assignment->name)
                  or ($a->user->name cmp $b->user->name)
                  or ($a->date cmp $b->date) } @rows;
@@ -344,6 +347,7 @@ EOT
       ["Sort by:", radio(SORT_BY(), 0,
                          [SORT_ASSIGNMENT, "Assignment"],
                          [SORT_USER, "User"],
+                         [SORT_FULL_NAME, "Full Name"],
                          [SORT_DATE, "Date"])],
       ["", $q->submit(-value=>"Search")]);
     say $q->end_table();
