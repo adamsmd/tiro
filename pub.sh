@@ -1,6 +1,6 @@
 #!/bin/sh
 set -x
-cp tiro.cgi tiro/
-cp config/* tiro/config/
-cp htaccess tiro/.htaccess
-cp htaccess_nonssl tiro/.htaccess_nonssl
+cp tiro.cgi demo/
+cp config/* demo/config/
+cp htaccess demo/.htaccess
+cp htaccess_nonssl demo/.htaccess_nonssl

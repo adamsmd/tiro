@@ -296,24 +296,23 @@ EOT
 
   say $q->h3("Select Assignment");
   say $q->start_table();
-  foreach my $assignment (@all_assignments) {
-    my $num_done = (grep { @$_ } @{$assignment->dates});
+  foreach my $a (@all_assignments) {
+    my $num_done = (grep { @$_ } @{$a->dates});
     my $num_users = @all_users;
-    my $late = (
-      $assignment->due ne "" and ($now ge $assignment->due) and
-      all {not any {$_ le $assignment->due} @$_} @{$assignment->dates});
+    my $late = ($a->due ne "" and ($now ge $a->due) and
+                not any {any {$_ le $a->due} @$_} @{$a->dates});
     say row(0, 1, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
-                                ASSIGNMENTS, $assignment->name),
-                       $assignment->name . ": ", $assignment->title),
+                                ASSIGNMENTS, $a->name),
+                       $a->name . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
             ($is_admin ? $q->small("&nbsp;($num_done/$num_users)") : "") .
             ($late ? "&nbsp;Late" : ""));
-    say row(0, 2, $q->small("&nbsp;&nbsp;Due " . pretty_date($assignment->due)))
-      unless $assignment->due eq "";
+    say row(0, 2, $q->small("&nbsp;&nbsp;Due " . pretty_date($a->due)))
+      unless $a->due eq "";
     say row(0, 2, $q->small({-class=>'hidden_until'},
                             "&nbsp;&nbsp;Hidden until " .
-                            pretty_date($assignment->hidden_until)))
-      unless $assignment->hidden_until lt $now;
+                            pretty_date($a->hidden_until)))
+      unless $a->hidden_until lt $now;
   }
   say row(0, 1, "(No assignments yet)") unless @all_assignments;
   say $q->end_table();
@@ -358,25 +357,22 @@ EOT
 
   say $q->start_div({-class=>'body'});
   if (do_upload_form()) {
-    foreach my $assignment (@assignments) {
+    foreach my $a (@assignments) {
       say $q->start_div({-class=>'assignment'});
-      say $q->h2($assignment->name . ": ", $assignment->title);
-      say $q->h4("Due by ", pretty_date($assignment->due))
-        unless $assignment->due eq "";
+      say $q->h2($a->name . ": ", $a->title);
+      say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
       say $q->div(scalar(slurp(catfile($config->assignments_dir,
-                                       $assignment->text_file))))
-        unless $assignment->text_file eq "";
-      say $q->div($assignment->text)
-        unless $assignment->text eq "";
+                                       $a->text_file))))
+        unless $a->text_file eq "";
+      say $q->div($a->text) unless $a->text eq "";
 
-      if ($assignment->file_count ne "") {
+      if ($a->file_count ne "") {
         say $q->start_form(
           -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
-        say $q->hidden(
-          -name=>ASSIGNMENTS, -value=>$assignment->name, -override=>1);
+        say $q->hidden(-name=>ASSIGNMENTS, -value=>$a->name, -override=>1);
         say $q->hidden(-name=>VALIDATION(), -value=>1, -override=>1);
         say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
-          for (1..$assignment->file_count);
+          for (1..$a->file_count);
         say $q->p($q->submit(DO_UPLOAD(), "Submit"));
         say $q->end_form();
       }
@@ -393,33 +389,34 @@ EOT
       say row(0, 7, $q->center('No results to display.',
                                'Browse or search to select assignment.'));
     } else {
-      foreach my $row (@rows) {
+      foreach my $r (@rows) {
         say $q->start_tbody();
-        my @url = (ASSIGNMENTS, $row->assignment->name, USERS, $row->user->name,
-                   START_DATE(), $row->date, END_DATE(), $row->date);
-        my @file_rows = @{$row->files} ?
+        my @url = (ASSIGNMENTS, $r->assignment->name, USERS, $r->user->name,
+                   START_DATE(), $r->date, END_DATE(), $r->date);
+        my @file_rows = @{$r->files} ?
           map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
-                $_->size] } @{$row->files} : ["(No files)", ""];
-        say multirow([$row->assignment->name, $row->assignment->title,
-                      $row->user->name, $row->user->full_name,
-                      ($row->date ?
+                $_->size] } @{$r->files} : ["(No files)", ""];
+        say multirow([$r->assignment->name, $r->assignment->title,
+                      $r->user->name, $r->user->full_name,
+                      ($r->date ?
                        (href(form_url(@url, VALIDATION(), 1, DO_RESULTS(), 1),
-                             pretty_date($row->date)) .
-                        ($row->date gt $row->assignment->due ? " (Late)" : "")) :
-                       ("(Nothing submitted)"))], @file_rows);
+                             pretty_date($r->date)) .
+                        (($r->assignment ne "" and
+                          $r->date gt $r->assignment->due) ? " (Late)" : ""))
+                       : ("(Nothing submitted)"))], @file_rows);
 
-        if (validation() and $row->date) {
-          if (not @{$row->assignment->validators}) {
+        if (validation() and $r->date) {
+          if (not @{$r->assignment->validators}) {
             say '<tr><td></td>';
             say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
-            say "Submission received on @{[pretty_date($row->date)]}.";
+            say "Submission received on @{[pretty_date($r->date)]}.";
             say '</td></tr>';
           } else {
             $ENV{'TIRO_SUBMISSION'} = filename(
-              $row->assignment->name, $row->user->name, $row->date);
+              $r->assignment->name, $r->user->name, $r->date);
             $ENV{'TIRO_ASSIGNMENT'} = catfile(
-              $config->assignments_dir, $row->assignment->path);
-            for my $validator (@{$row->assignment->validators}) {
+              $config->assignments_dir, $r->assignment->path);
+            for my $validator (@{$r->assignment->validators}) {
               say "<tr><td></td><td colspan=7><div>";
               warn "Running: $validator";
               system $validator;
