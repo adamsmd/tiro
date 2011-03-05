@@ -133,14 +133,13 @@ sub bool { $_[0] ? 1 : 0; }
 # Basic Inputs
 my $now = date "now";
 define_param(
-  start_date => \&date, end_date => \&date,
   do_search => \&bool, do_download => \&bool, do_upload => \&bool,
   do_upload_form => \&bool, do_results => \&bool,
+  start_date => \&date, end_date => \&date,
   only_latest => \&bool, validation => \&bool,
-  submitted => \&keyword, due => \&keyword, sort_by => \&keyword);
+  submitted => \&keyword, sort_by => \&keyword);
 use constant {
   SUBMITTED_YES=>"sub_yes", SUBMITTED_NO=>"sub_no", SUBMITTED_ANY=>"sub_any",
-  DUE_PAST=>'due_past', DUE_FUTURE=>'due_future', DUE_ANY=>'due_any',
   SORT_ASSIGNMENT=>'sort_assignment', SORT_USER=>'sort_user',
   SORT_DATE=>'sort_date', SORT_FULL_NAME=>'sort_full_name'};
 
@@ -163,9 +162,6 @@ my @all_assignments = list_assignments();
 
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->name}, \@assignments);
-@assignments = grep {
-  due() ne DUE_FUTURE and ($_->due eq "" or $_->due le $now) or
-    due() ne DUE_PAST and ($_->due eq "" or $_->due gt $now) } @assignments;
 
 my $file = file $q->param(FILE);
 my @files = $q->upload(FILE);
@@ -340,10 +336,6 @@ EOT
                         [SUBMITTED_ANY, "Any"],
                         [SUBMITTED_YES, "Submitted"],
                         [SUBMITTED_NO, "Unsubmitted"])],
-      ["Due:", radio(DUE(), 0,
-                     [DUE_ANY, "Any"],
-                     [DUE_PAST, "Past"],
-                     [DUE_FUTURE, "Future"])],
       ["Sort by:", radio(SORT_BY(), 0,
                          [SORT_ASSIGNMENT, "Assignment"],
                          [SORT_USER, "User"],
