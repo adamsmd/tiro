@@ -66,6 +66,7 @@ struct Assignment=>{
   text_file=>'$', due=>'$', file_count=>'$', validators=>'@'};
 struct Row=>{assignment=>'Assignment', user=>'User', date=>'$', files=>'@'};
 struct File=>{name=>'$', size=>'$'};
+struct Upload=>{name=>'$', handle=>'$'};
 
 defined $config_hash{$_} or $config_hash{$_} = ""
   for ('config_file', 'log_file', 'users_file', 'user_expires_column');
@@ -125,9 +126,9 @@ if ($config->users_file ne "") {
 ################
 
 # Input formats
-sub date { ((UnixDate($_[0], "%O") or "") =~ /^([A-Za-z0-9:-]+)$/)[0]; }
-sub file { (($_[0] or "") =~ qr/^(?:.*\/)?([A-Za-z0-9_\. -]+)$/)[0]; }
-sub keyword { (($_[0] or "") =~ qr/^([A-Za-z0-9_]*)/)[0]; }
+sub date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
+sub file { (($_[0] or "") =~ m[^(?:.*/)?([A-Za-z0-9_\. -]+)$])[0]; }
+sub keyword { (($_[0] or "") =~ m[^([A-Za-z0-9_]*)$])[0]; }
 sub bool { $_[0] ? 1 : 0; }
 
 # Basic Inputs
@@ -163,8 +164,8 @@ my @all_assignments = list_assignments();
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->name}, \@assignments);
 
-my $file = file $q->param(FILE);
-my @files = $q->upload(FILE);
+my $download = file $q->param(FILE);
+my @uploads = map {Upload->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 
 ################
 # Main Code
@@ -176,6 +177,10 @@ error("No such user: $remote_user")
   unless defined $config->users->{$remote_user};
 error("Access for $remote_user expired as of ", user($remote_user)->expires)
   unless $now lt date(user($remote_user)->expires);
+error("Invalid file names: ", $q->param(FILE))
+  unless not any { not defined $_->name } @uploads;
+error("Duplicate file names: ", map { $_->name } @uploads)
+  unless (map { $_->name } @uploads) == (uniq map { $_->name } @uploads);
 
 if (do_download()) { download(); }
 elsif (do_upload()) { upload(); }
@@ -196,29 +201,30 @@ sub error {
 }
 
 sub download {
-  @assignments and @users and start_date() and $file or
-    error ("Invalid download request");
+  @assignments or error("No assignment for download");
+  @users or error("No user for download");
+  start_date() or error("No date for download");
+  defined $download or error("No file for download");
   my ($assignment, $user) = ($assignments[0]->name, $users[0]->name);
-  my $path = filename($assignment, $user, start_date(), $file);
+  my $path = filename($assignment, $user, start_date(), $download);
   -f $path and -r $path or
-    error("Can't read $file in $assignment for $user at @{[start_date()]}");
+    error("Can't read $download in $assignment for $user at @{[start_date()]}");
   print $q->header(-type=>'application/octet-stream',
-                   -attachment=>$file, -Content_length=>-s $path);
+                   -attachment=>$download, -Content_length=>-s $path);
   copy($path, *STDOUT) or die "Failed to send download: ", $!;
 }
 
 sub upload {
-  @files or error("No files selected for upload.");
-  @files == uniq map { file $_ } @files or error("Duplicate file names.");
+  @uploads or error("No files selected for upload.");
   my $assignment = $assignments[0] or error("No assignment for upload.");
 
   my $target_dir = filename($assignment->name, $remote_user, $now);
-  warn "Starting upload of $_ in $target_dir" for @files;
+  warn "Starting upload of $_ in $target_dir" for @uploads;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->name]} for " .
                                "$remote_user at $now: $!");
-  foreach my $file (@files) {
-    copy($file, catfile($target_dir, file $file)) or
-      error("Can't save @{[file $file]} in @{[$assignment->name]} " .
+  foreach my $upload (@uploads) {
+    copy($upload->handle, catfile($target_dir, $upload->name)) or
+      error("Can't save @{[$upload->name]} in @{[$assignment->name]} " .
             "for $remote_user at $now: $!");
   }
   warn "Upload done for $_ (@{[-s catfile($target_dir, $_)]} bytes)" .
