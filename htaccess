@@ -1,8 +1,0 @@
-SSLRequireSSL
-#SSLOptions +StrictRequire
-AuthType KerberosV5
-AuthName "UITS Network ID"
-Require valid-user
-
-## Redirect non-https connections to https page
-# ErrorDocument 403 https://HOST/URL

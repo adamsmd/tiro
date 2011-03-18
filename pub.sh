@@ -1,9 +1,25 @@
 #!/bin/sh
 set -x
-cp tiro.cgi demo/
-cp system/config.cfg system/users.csv demo/system/
-cp system/bin/* demo/system/bin/
-cp system/lib/Tiro/Config.pm demo/system/lib/Tiro/
-rm system/log/log.txt
-cp htaccess demo/.htaccess
-cp htaccess_nonssl demo/.htaccess_nonssl
+
+DST=demo
+AUTH_TYPE=KerberosV5
+AUTH_NAME="UITS Network ID"
+HTTPS_URL='https://www.cs.indiana.edu/~adamsmd/cgi-pub/tiro/tiro.cgi'
+
+rm -f system/log/log.txt
+
+cp tiro.cgi $DST/
+cp -r system $DST
+cp -r assignments $DST
+cp -r submissions $DST
+
+cat <<EOF >$DST/.htaccess
+SSLRequireSSL
+#SSLOptions +StrictRequire
+AuthType $AUTH_TYPE
+AuthName "$AUTH_NAME"
+Require valid-user
+
+## Redirect non-https connections to https page
+ErrorDocument 403 $HTTPS_URL
+EOF

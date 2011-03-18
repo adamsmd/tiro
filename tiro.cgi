@@ -93,7 +93,7 @@ my $is_admin = any { $_ eq $remote_user } @{$config->admins};
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
 
 my ($remote_user_config) = grep {$_->name eq $remote_user} @all_users;
-@all_users = $is_admin ? @all_users : ($remote_user_config);
+@all_users = $is_admin ? @all_users : $remote_user_config || ();
 
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect(\@all_users, sub {$_[0]->name}, \@users);
@@ -115,7 +115,7 @@ my @uploads = map {Upload->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 error('Malformed remote user "' . $tainted_user . '".', "Missing .htaccess?")
   unless $remote_user;
 error("No such user: $remote_user")
-  unless defined $config->users->{$remote_user};
+  unless defined $remote_user_config;
 error("Access for $remote_user expired as of ", $remote_user_config->expires)
   unless $now lt date($remote_user_config->expires);
 error("Invalid file names: ", $q->param(FILE))
@@ -351,10 +351,21 @@ EOT
             say "Submission received on @{[pretty_date($r->date)]}.";
             say '</td></tr>';
           } else {
-            $ENV{'TIRO_SUBMISSION'} = filename(
+            $ENV{'TZ'} = Date_TimeZone(); # otherwise, can't determine timezone
+
+            $ENV{'TIRO_CONFIG_FILE'} = CONFIG_FILE;
+            $ENV{'TIRO_REMOTE_USER'} = $remote_user;
+            $ENV{'TIRO_SUBMISSION_DIR'} = filename(
               $r->assignment->name, $r->user->name, $r->date);
-            $ENV{'TIRO_ASSIGNMENT'} = catfile(
+            $ENV{'TIRO_SUBMISSION_USER'} $r->user->name;
+            $ENV{'TIRO_SUBMISSION_DATE'} $r->date;
+            $ENV{'TIRO_ASSIGNMENT_FILE'} = catfile(
               $config->assignments_dir, $r->assignment->path);
+            $ENV{'TIRO_ASSIGNMENT_NAME'} = $r->assignment->name;
+            $ENV{'TIRO_ASSIGNMENT_TITLE'} = $r->assignment->title;
+            $ENV{'TIRO_ASSIGNMENT_DUE'} = $r->assignment->due;
+            $ENV{'TIRO_ASSIGNMENT_FILE_COUNT'} = $r->assignment->file_count;
+
             for my $validator (@{$r->assignment->validators}) {
               say "<tr><td></td><td colspan=7><div>";
               warn "Running: $validator";

@@ -4,13 +4,16 @@ use strict; # Strict error checking
 $|++; # Unbuffer stdout
 umask 0077; # Default to private files
 
+use lib 'system/lib';
+use Tiro::Config;
+
 use File::Slurp qw(slurp); # Perl 6 feature
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 my $gray = "style=\"background:rgb(95%,95%,95%);\"";
 
-my $hash = parse_config($ENV{'TIRO_ASSIGNMENT'}, 'text', 'tests');
-my @tests = @{$hash->{'tests'}};
+my $assignment = parse_assignment_file($ENV{'TIRO_ASSIGNMENT_FILE'}, 'tests');
+my @tests = @{$assignment->misc('tests')};
 
 my $len = @tests;
 my $passed = 0;

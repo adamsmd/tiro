@@ -87,29 +87,28 @@ defined $global_config_default{$_} or $global_config_default{$_} = ""
   for ('config_file', 'log_file', 'users_file', 'user_expires_column');
 
 struct GlobalConfig=>{
-  config_file=>'$', working_dir=>'$', title=>'$', path=>'$',
+  working_dir=>'$', title=>'$', path=>'$',
   max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
   user_override=>'$', users=>'*%', users_file=>'$',
   user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
-  users_header_lines=>'$', text=>'$' };
+  users_header_lines=>'$', text=>'$', misc=>'%' };
 struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
 struct AssignmentConfig=>{
   name=>'$', path=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
-  text_file=>'$', due=>'$', file_count=>'$', validators=>'@'};
+  text_file=>'$', due=>'$', file_count=>'$', validators=>'@', misc=>'%'};
 
 =head2 parse_global_config_file
 
 =cut
 
 sub parse_global_config_file {
-  my ($file, %config) = @_;
+  my ($file, @lists) = @_;
 
-  # Use %global_defaults for things that %config doesn't define
-  %config = (%global_config_default, %config);
+  my %config = %global_config_default;
 
   if (defined $file) {
-    my %c = %{parse_config_file($file, 'text', 'admins', 'users')};
+    my %c = %{parse_config_file($file, 'text', 'admins', 'users', @lists)};
 
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
@@ -128,13 +127,13 @@ sub parse_global_config_file {
 =cut
 
 sub parse_assignment_file {
-  my ($file) = @_;
+  my ($file, @lists) = @_;
 
-  my %file = %{parse_config_file($file, 'text', 'validators')};
+  my %file = %{parse_config_file($file, 'text', 'validators', @lists)};
 
+  $file{$_} = date($file{$_}) for ('due', 'hidden_until');
   defined $file{$_} or $file{$_} = ""
     for ('due', 'hidden_until', 'text_file', 'text', 'file_count');
-  $file{$_} = date($file{$_}) for ('due', 'hidden_until');
 
   return AssignmentConfig->new(%file, misc=>\%file);
 }
