@@ -1,17 +1,38 @@
 Future features:
-* Critical
+* External
  - Install guide
- - file_name regex (as validator)
  - config file validator
- - Admin interface (but be clear what it looks like to student)
- - Server Time offset
+ - config editor
+   - global
+     - working_dir=>'$', title=>'$', path=>'$', timezone=>'$',
+       max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
+       assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
+       user_override=>'$', users=>'*%', users_file=>'$',
+       user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
+       users_header_lines=>'$', text=>'$', misc=>'%'
+     - body
+
+   - assignment
+     - create assignment
+     - delete assignment
+     - rename assignment
+     - edit assignment
+       - title=>'$', text=>'$', hidden_until=>'$', text_file=>'$',
+         due=>'$', file_count=>'$', validators=>'@', misc=>'%'
+       - body
+ - user alias creator
+ - submission collector
+   - all, late, not-late
+ - grade display
+
+* Critical
+ - error() is a render method
+ - nicely format "normal" errors
+ - Server Time offset (via timezones?)
  - Report back search params
- - text/plain on file download (regex)
 
 * Non-critical
- - hilight "overdue" in red or bold
  - Download tar-ball.
- - Folder edit: link under browse?, new (link under browse), delete, active, rename, validate config
  - Hilight sorted column
  - Clickable sorted column
  - file size with commas
@@ -24,18 +45,18 @@ Future features:
  - Separate upload page (so full assignment can be listed)
 
 * Unsorted
- - Upload chmod for group? (as silent validator?)
+ - Validation
+   - Search for only valid
+   - (late, invalid)
+   - grey out invalid
  - "Select Assignment":
    - hierarchical assignment grouping: # group: Labs -- Extra
    - Custom Assignment Order
    - oldest vs newest first
  - Alternate Heierachry via Soft Links
  - Fix strange formatting when blank config file
+ - Fix error when blank line at start of config file
  - Display all submissions after upload (but not test all)
    - Link to show all submissions?
- - New path root structure
- - Assignment name in search
  - What happens if a student spams the system?
- - Sort by student name, not just username
  - Default config should comment out or only have universal defaults
- - Security of H212 tiro submissions

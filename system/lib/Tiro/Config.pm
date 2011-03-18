@@ -87,13 +87,13 @@ defined $global_config_default{$_} or $global_config_default{$_} = ""
   for ('config_file', 'log_file', 'users_file', 'user_expires_column');
 
 struct GlobalConfig=>{
-  working_dir=>'$', title=>'$', path=>'$',
+  working_dir=>'$', title=>'$', path=>'$', timezone=>'$',
   max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
   user_override=>'$', users=>'*%', users_file=>'$',
   user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
   users_header_lines=>'$', text=>'$', misc=>'%' };
-struct UserConfig=>{name => '$', full_name => '$', expires => '$'};
+struct UserConfig=>{name=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
 struct AssignmentConfig=>{
   name=>'$', path=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', file_count=>'$', validators=>'@', misc=>'%'};
@@ -162,6 +162,9 @@ sub parse_user_configs {
       }
     }
   }
+
+  $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
+  $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
   return map { UserConfig->new(name => $_, %{$users{$_}}); } (keys %users);
 }

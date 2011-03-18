@@ -87,20 +87,17 @@ use constant {
 
 # Complex Inputs
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
-my $remote_user = file($tainted_user);
-my $is_admin = any { $_ eq $remote_user } @{$config->admins};
+my $login_name = file($tainted_user);
+my ($login) = grep {$_->name eq $login_name} @all_users;
+@all_users = (not $login) ? () : $login->is_admin ? @all_users : ($login);
 
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
-
-my ($remote_user_config) = grep {$_->name eq $remote_user} @all_users;
-@all_users = $is_admin ? @all_users : $remote_user_config || ();
-
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect(\@all_users, sub {$_[0]->name}, \@users);
 
 my @all_assignments = list_assignments();
-@all_assignments =
-  grep { $is_admin or ($_->hidden_until || "") le $now } @all_assignments;
+@all_assignments = grep {
+  $login->is_admin or ($_->hidden_until || "") le $now } @all_assignments;
 
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->name}, \@assignments);
@@ -112,12 +109,12 @@ my @uploads = map {Upload->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 # Main Code
 ################
 
-error('Malformed remote user "' . $tainted_user . '".', "Missing .htaccess?")
-  unless $remote_user;
-error("No such user: $remote_user")
-  unless defined $remote_user_config;
-error("Access for $remote_user expired as of ", $remote_user_config->expires)
-  unless $now lt date($remote_user_config->expires);
+error('Malformed login name "' . $tainted_user . '".', "Missing .htaccess?")
+  unless $login_name;
+error("No such user: $login_name")
+  unless defined $login;
+error("Access for $login_name expired as of ", $login->expires)
+  unless $now lt date($login->expires);
 error("Invalid file names: ", $q->param(FILE))
   unless not any { not defined $_->name } @uploads;
 error("Duplicate file names: ", map { $_->name } @uploads)
@@ -159,21 +156,21 @@ sub upload {
   @uploads or error("No files selected for upload.");
   my $assignment = $assignments[0] or error("No assignment for upload.");
 
-  my $target_dir = filename($assignment->name, $remote_user, $now);
+  my $target_dir = filename($assignment->name, $login_name, $now);
   warn "Starting upload of $_ in $target_dir" for @uploads;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->name]} for " .
-                               "$remote_user at $now: $!");
+                               "$login_name at $now: $!");
   foreach my $upload (@uploads) {
     copy($upload->handle, catfile($target_dir, $upload->name)) or
       error("Can't save @{[$upload->name]} in @{[$assignment->name]} " .
-            "for $remote_user at $now: $!");
+            "for $login_name at $now: $!");
   }
   warn "Upload done for $_ (@{[-s catfile($target_dir, $_)]} bytes)" .
     " in $target_dir" for dir_list($target_dir);
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
       -uri=>form_url(DO_RESULTS(), 1, VALIDATION(), validation(),
-                     ASSIGNMENTS, $assignment->name, USERS, $remote_user,
+                     ASSIGNMENTS, $assignment->name, USERS, $login_name,
                      START_DATE(), $now, END_DATE(), $now));
 }
 
@@ -232,7 +229,7 @@ sub render {
 EOT
 
   say $q->div({-class=>'welcome'},
-              "Welcome $remote_user<br>Current time is", pretty_date($now));
+              "Welcome $login_name<br>Current time is", pretty_date($now));
   say $q->h1($config->title);
 
   say $q->start_div({-class=>'navbar'});
@@ -248,7 +245,8 @@ EOT
                                 ASSIGNMENTS, $a->name),
                        $a->name . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
-            ($is_admin ? $q->small("&nbsp;($num_done/$num_users)") : "") .
+            ($login->is_admin ?
+             $q->small("&nbsp;($num_done/$num_users)") : "") .
             ($late ? "&nbsp;Late" : ""));
     say row(0, 2, $q->small("&nbsp;&nbsp;Due " . pretty_date($a->due)))
       unless $a->due eq "";
@@ -336,7 +334,8 @@ EOT
           map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
                 $_->size] } @{$r->files} : ["(No files)", ""];
         say multirow([$r->assignment->name, $r->assignment->title,
-                      $r->user->name, $r->user->full_name,
+                      $r->user->name . ($r->user->is_admin ? " (admin)" : ""),
+                      $r->user->full_name,
                       ($r->date ?
                        (href(form_url(@url, VALIDATION(), 1, DO_RESULTS(), 1),
                              pretty_date($r->date)) .
@@ -351,14 +350,15 @@ EOT
             say "Submission received on @{[pretty_date($r->date)]}.";
             say '</td></tr>';
           } else {
-            $ENV{'TZ'} = Date_TimeZone(); # otherwise, can't determine timezone
+            $ENV{'TZ'} = Date_TimeZone(); # make validators see the timezone
 
             $ENV{'TIRO_CONFIG_FILE'} = CONFIG_FILE;
-            $ENV{'TIRO_REMOTE_USER'} = $remote_user;
+            $ENV{'TIRO_LOGIN_NAME'} = $login_name;
+            $ENV{'TIRO_LOGIN_IS_ADMIN'} = $login->is_admin;
             $ENV{'TIRO_SUBMISSION_DIR'} = filename(
               $r->assignment->name, $r->user->name, $r->date);
-            $ENV{'TIRO_SUBMISSION_USER'} $r->user->name;
-            $ENV{'TIRO_SUBMISSION_DATE'} $r->date;
+            $ENV{'TIRO_SUBMISSION_USER'} = $r->user->name;
+            $ENV{'TIRO_SUBMISSION_DATE'} = $r->date;
             $ENV{'TIRO_ASSIGNMENT_FILE'} = catfile(
               $config->assignments_dir, $r->assignment->path);
             $ENV{'TIRO_ASSIGNMENT_NAME'} = $r->assignment->name;
