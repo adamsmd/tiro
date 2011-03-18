@@ -44,7 +44,9 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =cut
 
-our @EXPORT = qw(parse_global_config_file parse_assignment_file parse_user_configs);
+our @EXPORT = qw(
+  parse_global_config_file parse_assignment_file parse_user_configs
+  GlobalConfig UserConfig AssignmentConfig);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -58,7 +60,6 @@ sub date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 # Configuration
 my %global_config_default = (
   # Bootstrap Configurations
-  config_file=>'config/config.cfg',
   working_dir=>'.',
 
   # General Configurations
@@ -66,7 +67,7 @@ my %global_config_default = (
   path => '/usr/bin',
   max_post_size => 10000,
   date_format => '%a, %b %d %Y, %r',
-  log_file => 'config/log.txt',
+  log_file => 'system/log/log.txt',
 
   # Assignment Configurations
   assignments_dir => 'assignments',
@@ -108,8 +109,7 @@ sub parse_global_config_file {
   %config = (%global_config_default, %config);
 
   if (defined $file) {
-    my %c = %{parse_config_file($global_config_default{'config_file'},
-                                'text', 'admins', 'users')};
+    my %c = %{parse_config_file($file, 'text', 'admins', 'users')};
 
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},

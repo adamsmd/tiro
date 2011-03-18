@@ -5,36 +5,9 @@ $|++; # Unbuffer stdout
 umask 0077; # Default to private files
 delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)}; # Make %ENV safer
 
-use lib 'system/lib';
-
 # Configuration
-my $CONFIG_FILE = 'system/config.cfg';
-
-#my %config_hash = (
-#  # Bootstrap Configurations
-#  config_file=>'config/config.cfg',
-#  working_dir=>'.',
-#
-#  # General Configurations
-#  # title => 'Assignment Submission Demo',
-#  path => '/usr/bin',
-#  max_post_size => 10000,
-#  date_format => '%a, %b %d %Y, %r',
-#  log_file => 'config/log.txt',
-#
-#  # Assignment Configurations
-#  assignments_dir => 'assignments',
-#  assignments_regex => qr[^(\w+)\.cfg$],
-#  submissions_dir => 'submissions',
-#
-#  # User Configurations
-#  #admins => ['user1'],
-#  #user_override => 'user1',
-#  #users => { user1 => { full_name => 'Demo User #1', expires=>'tomorrow'} },
-#  #users_file=>"users.csv",
-#  #user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
-#  #users_header_lines=>1,
-#  );
+use constant CONFIG_FILE => 'system/config.cfg';
+use lib 'system/lib';
 
 # Modules from Core
 use CGI qw/-private_tempfiles -nosticky/;
@@ -43,7 +16,6 @@ use Class::Struct;
 use File::Copy qw/copy/; # NOTE: move() has tainting issues
 use File::Path qw/mkpath/;
 use File::Spec::Functions;
-use Text::ParseWords;
 use Time::HiRes qw/time/;
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
@@ -54,28 +26,13 @@ use File::Slurp qw/slurp/; # Perl 6 feature
 use List::MoreUtils qw/:all/;
 
 ################
-# Static Defs
+# Structs
 ################
 
-# Structs
-struct Config=>{
-  config_file=>'$', working_dir=>'$', title=>'$', path=>'$',
-  max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
-  assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
-  user_override=>'$', users=>'*%', users_file=>'$',
-  user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
-  users_header_lines=>'$', text=>'$' };
-struct User=>{name => '$', full_name => '$', expires => '$'};
-struct Assignment=>{
-  name=>'$', path=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
-  text_file=>'$', due=>'$', file_count=>'$', validators=>'@'};
-#struct Row=>{assignment=>'Assignment', user=>'User', date=>'$', files=>'@'};
-struct Row=>{assignment=>'$', user=>'$', date=>'$', files=>'@'};
+struct Row=>{
+  assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
 struct File=>{name=>'$', size=>'$'};
 struct Upload=>{name=>'$', handle=>'$'};
-
-#defined $config_hash{$_} or $config_hash{$_} = ""
-#  for ('config_file', 'log_file', 'users_file', 'user_expires_column');
 
 ################
 # Bootstrap
@@ -83,19 +40,7 @@ struct Upload=>{name=>'$', handle=>'$'};
 
 my $start_time = time();
 
-# START
-#my $config = Config->new(%config_hash);
-#
-#if ($config->config_file ne "") {
-#  my $hash = parse_config($config->config_file, 'text', 'admins', 'users');
-#  $hash->{'users'} = { map { /\s*(.*?)\s*--\s*(.*?)\s*--\s*(.*)\s*/;
-#                             ($1, { full_name => $2, expires => $3 }) }
-#                       @{$hash->{'users'}} };
-#  %config_hash = (%config_hash, %{$hash});
-#  $config = Config->new(%config_hash);
-#}
-# END
-my $config = parse_global_config_file($CONFIG_FILE);
+my $config = parse_global_config_file(CONFIG_FILE);
 
 chdir $config->working_dir or
   die "Can't chdir to working_dir ", $config->working_dir, ": $!";
@@ -115,27 +60,10 @@ exists $ENV{$_} and warn("$_: ", $ENV{$_}) for
   ("REMOTE_HOST", "REMOTE_USER", "HTTP_REFERER", "HTTP_X_FORWARDED_FOR");
 warn "Param $_: ", join(":",$q->param($_)) for $q->param();
 
-# BEGIN
-#if ($config->users_file ne "") {
-#  for (drop($config->users_header_lines || 0,
-#            split("\n", slurp $config->users_file))) {
-#    my @words = quotewords(",", 0, $_);
-#    my $name = $words[$config->user_name_column];
-#    my $full_name = $words[$config->user_full_name_column];
-#    my $expires = $config->user_expires_column eq "" ?
-#      'tomorrow' : $words[$config->user_expires_column];
-#    if (defined $name and defined $full_name and defined $expires) {
-#      $config_hash{'users'}->{$name} = {
-#        full_name => $full_name, expires => $expires };
-#    }
-#  }
-#  $config = Config->new(%config_hash);
-#}
-#END
-my @all_users = parse_user_configs($config);
+my @all_users = sort {$a->name cmp $b->name} parse_user_configs($config);
 
 ################
-# Parse Inputs
+# Input Parsing
 ################
 
 # Input formats
@@ -164,11 +92,8 @@ my $is_admin = any { $_ eq $remote_user } @{$config->admins};
 
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
 
-#my @all_users = $is_admin ? sort keys %{$config->users} : ($remote_user);
 my ($remote_user_config) = grep {$_->name eq $remote_user} @all_users;
-@all_users = $is_admin ?
-  sort {$a->name cmp $b->name} @all_users : ($remote_user_config);
-#@all_users = map { user($_) } @all_users;
+@all_users = $is_admin ? @all_users : ($remote_user_config);
 
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect(\@all_users, sub {$_[0]->name}, \@users);
@@ -193,8 +118,6 @@ error("No such user: $remote_user")
   unless defined $config->users->{$remote_user};
 error("Access for $remote_user expired as of ", $remote_user_config->expires)
   unless $now lt date($remote_user_config->expires);
-#error("Access for $remote_user expired as of ", user($remote_user)->expires)
-#  unless $now lt date(user($remote_user)->expires);
 error("Invalid file names: ", $q->param(FILE))
   unless not any { not defined $_->name } @uploads;
 error("Duplicate file names: ", map { $_->name } @uploads)
@@ -471,23 +394,14 @@ sub list_assignments {
           my $assignment = parse_assignment_file(
             catfile($config->assignments_dir, $path));
 
-          #my $hash = parse_config(catfile($config->assignments_dir, $path),
-          #                        'text', 'validators');
-          #$hash->{$_} = date($hash->{$_}) for ('due', 'hidden_until');
-          #defined $hash->{$_} or $hash->{$_} = ""
-          #  for ('due', 'hidden_until', 'text_file', 'text', 'file_count');
-          #Assignment->new(
-          #  dates=> [map {[list_dates($name, $_->name, 1)]} @all_users],
-          #  name=> $name, path=> $path, %{$hash});
-          $assignment->dates([map {[list_dates($name, $_->name, 1)]} @all_users]);
+          $assignment->dates([map {[list_dates($name, $_->name, 1)]}
+                              @all_users]);
           $assignment->name($name);
           $assignment->path($path);
           $assignment;
         }
   } dir_list($config->assignments_dir);
 }
-
-#sub user { User->new(name => $_[0], %{$config->users->{$_[0]}}) }
 
 sub list_dates {
   my ($assignment, $user, $all) = @_;
@@ -562,10 +476,6 @@ sub multirow {
 # General Utils
 ################
 
-# START
-#sub drop { @_[$_[0]+1..$#_] }
-# END
-
 sub intersect {
   my ($list1, $fun, $list2) = @_;
   my %a = map {($_,1)} @{$_[2]};
@@ -578,21 +488,3 @@ sub dir_list {
   closedir $d;
   return sort grep {!/^\./} @ds; # skip dot files
 }
-
-#sub parse_config {
-#  my ($filename, $body_name, @lists) = @_;
-#  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n\s*(.*))?$/s;
-#  my %hash = map { ($_, []) } @lists;
-#  for (split "\n", $lines) {
-#    my ($key, $value) = /^\s*([^:]*?)\s*:\s*(.*?)\s*$/;
-#    if (defined $key and defined $value) {
-#      if (grep { $_ eq $key } @lists) {
-#        push @{$hash{$key}}, $value;
-#      } else {
-#        $hash{$key} = $value;
-#      }
-#    }
-#  }
-#  $hash{$body_name} = ($hash{$body_name} || "") . ($body || "");
-#  return \%hash;
-#}
