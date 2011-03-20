@@ -49,3 +49,211 @@ the recording of statements and meetings in real-time which led
 to the notarii being official record keepers.  Thus the meaning of
 the term 'notarius' shifted to mean an official records keeper or one
 who certifies documents and eventually the modern term, 'notary'.
+
+
+
+
+## Design Principals
+ The system is designed to be small with minimal requirements and a backend
+ data representation that is trival to manipulate.
+ 
+- Data must not be lost:
+  If a student submits a file, we had better receive it.
+  In the case of catastrophic failure student submissions should
+  be accessable without needing special tools.
+- Data must not be leaked:
+  A student's assignment should not be accessable to unauthorized people.
+  We don't want one student stealing another students submission.
+- Data must be authentic:
+  We don't want students to be able forge a submissions.
+- Solutions should be as simple as possible and have minimal requirements:
+  We don't want to have a complicated database represenation
+  or require the installation of obscure software.
+
+## Requirements:
+  Perl 5.8 or later
+  A web server with CGI and HTTP authentication
+    (Apache with SSL is prefered.)
+  Date::Manip (TODO link and version)
+  File::Slurp (TODO link and version)
+  List::MoreUtils (TODO link and version)
+
+## Model
+- Users
+  - Authentication via HTTP and .htaccess
+  - Admins
+  - Expiration
+- Assignments
+  - Due date
+- Submissions
+
+## Configuration File Format
+
+Both the global configuration file and the assignment configuration
+files use the same format.  A configuration file start with a header
+made up of multiple lines.  The header ends at the first blank line.
+(A line with only white space counts as a blank line.)  Everything
+after the header counts as the body.  The body is unstructured text.
+
+Header lines consist of a key and a value separated by the first
+colon (':') on the line.
+White space at the start and end of the key and value is trimmed
+and ignored.
+The same key may be duplicated multiple times.
+For keys representing scalar properties, only the last value has effect.
+But for keys representing list properties, each value becomes
+a separate element of the list.
+
+Header lines that don't contain colons are ignored.  So any line that
+doesn't contain a colon or uses an unknown key is effectively a
+comment.  In general keys should not start with hash ('#') so that
+lines starting with a hash are effectively always comments regardless
+of whether they contain a colon.
+
+## Global Configuration
+
+By default the global configuration is stored in system/config.cfg,
+but this can be overridden by setting CONFIG_FILE in tiro.cgi.
+
+title (required): The title to display
+
+working_dir (defaults to the same directory):
+  the working directory from which tiro.cgi should
+path (defaults to /usr/local/bin:/usr/bin:/bin): 
+max_post_size (defaults to 10000):
+date_format (defaults to "%a, %b %d %Y, %r"):
+log_file (defaults to "system/log/log.txt"):
+
+assignments_dir (defaults to "assignments"):
+assignments_regex (defaults to "^(\w+)\.cfg$"):
+submissions_dir (defaults to "submissions"):
+
+admins (list, defaults to the empty list):
+user_override (defaults to the empty string):
+users (list, defaults to the empty list):
+users_file (defaults to the empty string):
+user_name_column (defaults to the empty string):
+user_full_name_column (defaults to the empty string):
+user_expires_column (defaults to the empty string):
+users_header_lines (defaults to "0"):
+
+text (defaults to the empty string)
+misc
+
+## Assignment Configuration
+
+By default assignments are stored in the assignments/ folder, but this
+can be overridden by setting assignments_dir in the global
+configuration file.
+
+  assignments_dir => 'assignments',
+  assignments_regex => qr[^(\w+)\.cfg$],
+
+title (required): The assignment title
+
+hidden_until (defaults to the empty string):
+due (defaults to the empty string):
+file_count (defaults to the empty string):
+validators (list, defaults to the empty list):
+
+text_file (defaults to the empty string):
+
+text (defaults to the empty string)
+misc
+
+## Validators
+
+## Configuration
+Configuration consists of three things:
+- The location of the global configuration file.  It is set by editing
+  upload.cgi so that the DIR constant points to the appropriate path
+  as in the follow example.
+  > use constant DIR => "/path/to/global_config.json";
+- Global configuration settings.  These are stored in the global configuration
+  file and set among other things the location of the assignment configuration
+  folder and the assignment file folder.
+- Assignment configuration settings.
+  Each file in the assignment configuration folder is treated as
+  the folder configuration for an assignment identified by that file name
+  unless the filename it matches the file_configs_ignore regular expression.
+
+Both the global configuration settings and the assignment
+configuration settings are stored in [JSON](TODO) syntax.
+
+### Global Configuration Settings
+The global configuration file is a JSON file that contains a single
+dictionary with the following keys mapping to the described values.
+ - title: (String) The title that should be displayed at the top of all pages.
+ - folder_configs: (String) The absolute path to the directory containing folder configuration files.
+ - folder_configs_ignore: (String) A Perl regular expression.  Files in the
+   folder_configs directory are ignored if they match this regular expression.
+ - folder_files: (String) The absolute path to the directory containing 
+ - cgi_url: (String) The URL the script should use to refer to create links and forms that refer back to itself.
+ - path: (String) The environment PATH that checkers should run with.
+ - post_max: (Integer) The maximum number of bytes allowed to be uploaded.
+ - admins: (List of String) The users that are application administrators.
+     They can see uploads by other users.
+ - users: (Dictionary) Maps each usernames (as a string) to
+   a dictionary that represents the configuration settings for that user.
+   That dictionary contains the following keys mapping to the described values.
+   - full_name: (String) The full name of the user.
+     Only used for display purposes.
+   - expires: (String) The date afterwhich this user should no longer be
+     allowed access.  Any date format parsable by Date::Manip is allowed.
+
+### Folder Configuration Settings
+A folder configuration file is a JSON file that contains a single
+dictionary with the following keys mapping to the described values.
+The identifier for the folder configuration is taken from the file name
+of the folder configuration file.
+
+- title: (String) The friendly name for the folder.  Only used for display purposes.
+- text: (String) HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a <div> and is usually a description of the folder or any special instructions the user should now before uploading.
+- due: (String) The date that the folder is due.  Any date format parsabel by Date::Manip is allowed.
+- file_count: (Number) The number of file uploads to allow.
+- checkers: (Array) A list of checkers to run on submissions for this folder.
+    Each element of the array is itself a two element array.
+    - The first element is a string indicating the name of the checker.
+      The first element only used for display purposes.
+    - The second element is the program to run for the checker and
+      is represented as an array of strings.
+      The first string is the program the other strings are the arguments
+      to the program.  The directory containing a particular submission
+      is passed as a final argument after the arguments specified in this array.
+
+## Database Representation
+
+- global_config.json - Holds the global configuration.  Location specified by DIR constant in upload.cgi.
+- folder_configs/ - Contains 
+  - assignment1
+  - assignment2
+- folder_files/
+  - assignment1/
+    - user1/
+      - 2010-01-01T00:00:00/
+        - file1
+        - file2
+      - 2010-01-02T00:00:00/
+        - file1
+        - file2
+    - user2/ - 
+  - assignment2/ - 
+
+## Tips and Tricks
+- if you want to validate filenames, write an external checker
+- group work is possible if you symlink the right assignment folders together
+- The assignment text can be used to store complete assignment descriptions
+  or just quick notes on assignment description depending on how you want
+  to use it.
+- Number of submissions is listed for admin users
+- Users and Folders are multi-selectable
+- Start and end dates can be any format parsable by Date::Manip.
+- To find students who haven't submitted, change the Status to search
+  not "Not Submitted".
+- Checks run automaticaly when student submits, but they
+  can still be run later by checking the "Run checks" option in the search
+  or by clicking "[check]" in the list of previously uploaded files.
+- Checkers get the same standard out and standard err as the CGI script
+  so anything printed to standard out will be sent to the web browser
+  and anything printed to standard error will be sent to the webserver's
+  error log.

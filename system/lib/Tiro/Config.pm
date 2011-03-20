@@ -64,7 +64,7 @@ my %global_config_default = (
 
   # General Configurations
   # title => 'Assignment Submission Demo',
-  path => '/usr/bin',
+  path => '/usr/local/bin:/usr/bin:/bin',
   max_post_size => 10000,
   date_format => '%a, %b %d %Y, %r',
   log_file => 'system/log/log.txt',
@@ -80,7 +80,7 @@ my %global_config_default = (
   #users => { user1 => { full_name => 'Demo User #1', expires=>'tomorrow'} },
   #users_file=>"users.csv",
   #user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
-  #users_header_lines=>1,
+  users_header_lines=>0,
   );
 
 defined $global_config_default{$_} or $global_config_default{$_} = ""
@@ -92,11 +92,13 @@ struct GlobalConfig=>{
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
   user_override=>'$', users=>'*%', users_file=>'$',
   user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
-  users_header_lines=>'$', text=>'$', misc=>'%' };
+  users_header_lines=>'$',
+  text=>'$', misc=>'%' };
 struct UserConfig=>{name=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
 struct AssignmentConfig=>{
-  name=>'$', path=>'$', dates=>'@', title=>'$', text=>'$', hidden_until=>'$',
-  text_file=>'$', due=>'$', file_count=>'$', validators=>'@', misc=>'%'};
+  name=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
+  text_file=>'$', due=>'$', file_count=>'$', validators=>'@',
+  text=>'$', misc=>'%'};
 
 =head2 parse_global_config_file
 

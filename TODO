@@ -23,6 +23,7 @@ Future features:
  - user alias creator
  - submission collector
    - all, late, not-late
+ - log file interpreter
  - grade display
 
 * Critical

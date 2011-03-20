@@ -10,13 +10,14 @@ use constant CONFIG_FILE => 'system/config.cfg';
 use lib 'system/lib';
 
 # Modules from Core
-use CGI qw/-private_tempfiles -nosticky/;
-use CGI::Carp qw/carpout/;
+use CGI qw(-private_tempfiles -nosticky);
+use CGI::Carp qw(carpout set_progname);
+use Carp qw(verbose);
 use Class::Struct;
-use File::Copy qw/copy/; # NOTE: move() has tainting issues
-use File::Path qw/mkpath/;
+use File::Copy qw(copy); # NOTE: move() has tainting issues
+use File::Path qw(mkpath);
 use File::Spec::Functions;
-use Time::HiRes qw/time/;
+use Time::HiRes qw(time);
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 # Modules not from Core
@@ -29,8 +30,8 @@ use List::MoreUtils qw/:all/;
 # Structs
 ################
 
-struct Row=>{
-  assignment=>'AssignmentConfig', user=>'UserConfig', date=>'$', files=>'@'};
+struct Row=>{assignment=>'AssignmentConfig', user=>'UserConfig',
+             date=>'$', files=>'@'};
 struct File=>{name=>'$', size=>'$'};
 struct Upload=>{name=>'$', handle=>'$'};
 
@@ -39,6 +40,8 @@ struct Upload=>{name=>'$', handle=>'$'};
 ################
 
 my $start_time = time();
+
+set_progname("tiro.cgi (PID:$$)");
 
 my $config = parse_global_config_file(CONFIG_FILE);
 
@@ -50,6 +53,8 @@ if ($config->log_file ne "") {
     die "Can't open log file ", $config->log_file, ": $!\n";
   carpout($LOG_FILE);
 }
+
+warn "Starting tiro.cgi";
 
 $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
