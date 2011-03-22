@@ -81,9 +81,15 @@ who certifies documents and eventually the modern term, 'notary'.
 ## Model
 - Users
   - Authentication via HTTP and .htaccess
-  - Admins
-  - Expiration
+    - User Override
+  - Properties
+    - Admins
+    - Username
+    - Fullname
+    - Expiration
+  - From global config or CSV
 - Assignments
+  - 
   - Due date
 - Submissions
 
@@ -122,7 +128,7 @@ working_dir (defaults to the same directory):
 path (defaults to /usr/local/bin:/usr/bin:/bin): 
 max_post_size (defaults to 10000):
 date_format (defaults to "%a, %b %d %Y, %r"):
-log_file (defaults to "system/log/log.txt"):
+log_file (defaults to "system/log/log-%Y-%m-%d.txt"):
 
 assignments_dir (defaults to "assignments"):
 assignments_regex (defaults to "^(\w+)\.cfg$"):

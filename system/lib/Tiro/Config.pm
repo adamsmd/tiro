@@ -67,7 +67,7 @@ my %global_config_default = (
   path => '/usr/local/bin:/usr/bin:/bin',
   max_post_size => 10000,
   date_format => '%a, %b %d %Y, %r',
-  log_file => 'system/log/log.txt',
+  log_file => 'system/log/log-%Y-%m-%d.txt',
 
   # Assignment Configurations
   assignments_dir => 'assignments',

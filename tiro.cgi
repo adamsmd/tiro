@@ -49,12 +49,13 @@ chdir $config->working_dir or
   die "Can't chdir to working_dir ", $config->working_dir, ": $!";
 
 if ($config->log_file ne "") {
-  open(my $LOG_FILE, ">>" . $config->log_file) or
+  open(my $LOG_FILE, ">>" . UnixDate("now", $config->log_file)) or
     die "Can't open log file ", $config->log_file, ": $!\n";
   carpout($LOG_FILE);
 }
 
-warn "Starting tiro.cgi";
+warn "*** Starting tiro.cgi ***";
+# TODO: *** Stopping tiro.cgi ***
 
 $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
@@ -139,6 +140,7 @@ sub error {
   say $q->start_html(-title=>$config->title . ": Error");
   say $q->h1($config->title . ": Error");
   my ($package, $filename, $line) = caller;
+  warn @_, "(At line $line)";
   say $q->p([@_, "(At line $line and time $now.)"]);
   exit 0;
 }
@@ -165,11 +167,14 @@ sub upload {
   warn "Starting upload of $_ in $target_dir" for @uploads;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->name]} for " .
                                "$login_name at $now: $!");
+  my $umask = umask 0377;
   foreach my $upload (@uploads) {
     copy($upload->handle, catfile($target_dir, $upload->name)) or
       error("Can't save @{[$upload->name]} in @{[$assignment->name]} " .
             "for $login_name at $now: $!");
   }
+  umask $umask;
+  chmod 0500, $target_dir;
   warn "Upload done for $_ (@{[-s catfile($target_dir, $_)]} bytes)" .
     " in $target_dir" for dir_list($target_dir);
   print $q->redirect(

@@ -48,7 +48,7 @@ Future features:
 * Unsorted
  - Validation
    - Search for only valid
-   - (late, invalid)
+   - (late, rejected)
    - grey out invalid
  - "Select Assignment":
    - hierarchical assignment grouping: # group: Labs -- Extra
@@ -60,4 +60,22 @@ Future features:
  - Display all submissions after upload (but not test all)
    - Link to show all submissions?
  - What happens if a student spams the system?
+   - max submits per assignment
  - Default config should comment out or only have universal defaults
+
+ - error -> panic
+ - error -> factor render code
+ - .error shown only to admins and claimed rejected to students
+ - Disclaimer at the end of test.pl
+ - Admin only features get pink background?
+ - log viewer (bin/)
+
+ - Admin sees non-admin view (drop box in user display?)
+ + Tiro directories as read only
+ - Symlink and collection scripts
+ + Log filenames with date in them
+ - late_after: ...
+ - Username in log line
+ - Max number of submissions and default_max_number_of_submissions
+ - max_upload_size and default_max_upload_size
+ - PID breaks if alternate servers (include hostname, but local networks)
