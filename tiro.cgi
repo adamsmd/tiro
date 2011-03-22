@@ -55,12 +55,11 @@ if ($config->log_file ne "") {
 }
 
 warn "*** Starting tiro.cgi ***";
-# TODO: *** Stopping tiro.cgi ***
 
 $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
 my $q = CGI->new;
-die $q->cgi_error() if $q->cgi_error();
+panic($q->cgi_error()) if $q->cgi_error();
 
 exists $ENV{$_} and warn("$_: ", $ENV{$_}) for
   ("REMOTE_HOST", "REMOTE_USER", "HTTP_REFERER", "HTTP_X_FORWARDED_FOR");
@@ -81,8 +80,9 @@ sub bool { $_[0] ? 1 : 0; }
 # Basic Inputs
 my $now = date "now";
 define_param(
-  do_search => \&bool, do_download => \&bool, do_upload => \&bool,
-  do_upload_form => \&bool, do_results => \&bool,
+  do_download => \&bool, do_upload => \&bool,
+  show_search_form => \&bool, show_upload_form => \&bool,
+  show_search_results => \&bool,
   start_date => \&date, end_date => \&date,
   only_latest => \&bool, validation => \&bool,
   submitted => \&keyword, sort_by => \&keyword);
@@ -115,34 +115,49 @@ my @uploads = map {Upload->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 # Main Code
 ################
 
-error('Malformed login name "' . $tainted_user . '".', "Missing .htaccess?")
+panic('Malformed login name "' . $tainted_user . '".', "Missing .htaccess?")
   unless $login_name;
-error("No such user: $login_name")
+panic("No such user: $login_name")
   unless defined $login;
-error("Access for $login_name expired as of ", $login->expires)
+panic("Access for $login_name expired as of ", $login->expires)
   unless $now lt date($login->expires);
-error("Invalid file names: ", $q->param(FILE))
+error('Invalid file names (only "A-Za-z0-9_. -" characters allowed):',
+      $q->param(FILE))
   unless not any { not defined $_->name } @uploads;
-error("Duplicate file names: ", map { $_->name } @uploads)
+error("Duplicate file names:", map { $_->name } @uploads)
   unless (map { $_->name } @uploads) == (uniq map { $_->name } @uploads);
 
 if (do_download()) { download(); }
 elsif (do_upload()) { upload(); }
-else { render(search_results()); }
-exit 0;
+else { my @rows = search_results(); render(sub {body(@rows)}); }
+logged_exit();
 
 ################
 # Actions
 ################
 
-sub error {
+sub logged_exit {
+  warn "*** Stopping tiro.cgi ***";
+  exit 0;
+}
+
+sub panic { # Prints error without navigation components
   print $q->header();
-  say $q->start_html(-title=>$config->title . ": Error");
-  say $q->h1($config->title . ": Error");
+  say $q->start_html(-title=>"Error: " . $config->title);
+  say $q->h1("Error: " . $config->title);
   my ($package, $filename, $line) = caller;
   warn @_, "(At line $line)";
   say $q->p([@_, "(At line $line and time $now.)"]);
-  exit 0;
+  logged_exit();
+}
+
+sub error { # Prints error with navigation components
+  my (@message) = @_;
+  my ($package, $filename, $line) = caller;
+  warn @message, "(At line $line)";
+  render(sub { say $q->h1({-style=>"color:red;"}, ["Error: ", @message]);
+               say $q->p("(At line $line and time $now.)"); });
+  logged_exit();
 }
 
 sub download {
@@ -179,7 +194,7 @@ sub upload {
     " in $target_dir" for dir_list($target_dir);
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
-      -uri=>form_url(DO_RESULTS(), 1, VALIDATION(), validation(),
+      -uri=>form_url(SHOW_SEARCH_RESULTS(), 1, VALIDATION(), validation(),
                      ASSIGNMENTS, $assignment->name, USERS, $login_name,
                      START_DATE(), $now, END_DATE(), $now));
 }
@@ -210,7 +225,7 @@ sub search_results {
 }
 
 sub render {
-  my (@rows) = @_;
+  my ($body_function) = @_;
 
   print $q->header();
   say $q->start_html(-title=>$config->title, -style=>{-verbatim=><<'EOT'});
@@ -251,7 +266,7 @@ EOT
     my $num_users = @all_users;
     my $late = ($a->due ne "" and ($now ge $a->due) and
                 not any {any {$_ le $a->due} @$_} @{$a->dates});
-    say row(0, 1, href(form_url(DO_UPLOAD_FORM(), 1, DO_RESULTS(), 1,
+    say row(0, 1, href(form_url(SHOW_UPLOAD_FORM(), 1, SHOW_SEARCH_RESULTS(), 1,
                                 ASSIGNMENTS, $a->name),
                        $a->name . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
@@ -270,17 +285,17 @@ EOT
 
   say $q->h3("... or", href(form_url(), "Start Over"));
 
-  say $q->h3("... or", href(form_url(DO_SEARCH(), 1), "Search"));
-  if (do_search()) {
+  say $q->h3("... or", href(form_url(SHOW_SEARCH_FORM(), 1), "Search"));
+  if (show_search_form()) {
     say $q->start_form(-action=>'#', -method=>'GET');
-    say $q->hidden(-name=>DO_SEARCH(), -default=>1);
-    say $q->hidden(-name=>DO_RESULTS(), -default=>1);
+    say $q->hidden(-name=>SHOW_SEARCH_FORM(), -default=>1);
+    say $q->hidden(-name=>SHOW_SEARCH_RESULTS(), -default=>1);
     say $q->start_table({-class=>'search'});
     map { say row(0, 1, @$_) } (
       ["User:", multilist(USERS, map {$_->name} @all_users)],
       ["Assignment:", multilist(ASSIGNMENTS, map {$_->name} @all_assignments)],
       ["Show:", boxes([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
-                      [DO_UPLOAD_FORM(), do_upload_form(), 'Upload Form'],
+                      [SHOW_UPLOAD_FORM(), show_upload_form(), 'Upload Form'],
                       [VALIDATION(), validation(), 'Validation'])],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
@@ -303,7 +318,20 @@ EOT
   say $q->end_div();
 
   say $q->start_div({-class=>'body'});
-  if (do_upload_form()) {
+  &$body_function();
+  say $q->end_div();
+
+  say $q->p({-class=>'footer'}, "Completed in",
+            sprintf("%0.3f", time() - $start_time), "seconds by",
+            $q->a({-href=>'http://www.cs.indiana.edu/~adamsmd/projects/tiro/'},
+                  "Tiro") . ".");
+  say $q->end_html();
+}
+
+sub body {
+  my (@rows) = @_;
+
+  if (show_upload_form()) {
     foreach my $a (@assignments) {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($a->name . ": ", $a->title);
@@ -328,7 +356,7 @@ EOT
     }
   }
 
-  if (do_results()) {
+  if (show_search_results()) {
     say $q->start_table({-class=>'results'});
     say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
                                  "Validation", "Files", "Bytes"])));
@@ -347,7 +375,8 @@ EOT
                       $r->user->name . ($r->user->is_admin ? " (admin)" : ""),
                       $r->user->full_name,
                       ($r->date ?
-                       (href(form_url(@url, VALIDATION(), 1, DO_RESULTS(), 1),
+                       (href(form_url(@url, VALIDATION(), 1,
+                                      SHOW_SEARCH_RESULTS(), 1),
                              pretty_date($r->date)) .
                         (($r->assignment ne "" and
                           $r->date gt $r->assignment->due) ? " (Late)" : ""))
@@ -391,16 +420,10 @@ EOT
     say $q->end_table();
   }
 
-  if (not do_upload_form() and not do_results()) {
+  if (not show_upload_form() and not show_search_results()) {
     say $config->text;
   }
-  say $q->end_div();
 
-  say $q->p({-class=>'footer'}, "Completed in",
-            sprintf("%0.3f", time() - $start_time), "seconds by",
-            $q->a({-href=>'http://www.cs.indiana.edu/~adamsmd/projects/tiro/'},
-                  "Tiro") . ".");
-  say $q->end_html();
 }
 
 ################

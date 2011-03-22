@@ -3,6 +3,7 @@ Future features:
  - Install guide
  - config file validator
  - config editor
+   - default
    - global
      - working_dir=>'$', title=>'$', path=>'$', timezone=>'$',
        max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
@@ -40,7 +41,6 @@ Future features:
  - Put "multi-selectable" under Users and Folders search box
 
 * Rejected ideas (unless someone has a good reason to include them)
- - Check box for show upload form
  - select subset of checkers to run
  - detailed sort-by
  - Separate upload page (so full assignment can be listed)
@@ -63,8 +63,8 @@ Future features:
    - max submits per assignment
  - Default config should comment out or only have universal defaults
 
- - error -> panic
- - error -> factor render code
+ + error -> panic
+ + error -> factor render code
  - .error shown only to admins and claimed rejected to students
  - Disclaimer at the end of test.pl
  - Admin only features get pink background?
