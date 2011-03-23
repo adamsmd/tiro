@@ -97,7 +97,7 @@ struct GlobalConfig=>{
 struct UserConfig=>{name=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
 struct AssignmentConfig=>{
   name=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
-  text_file=>'$', due=>'$', file_count=>'$', validators=>'@',
+  text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', validators=>'@',
   text=>'$', misc=>'%'};
 
 =head2 parse_global_config_file
@@ -133,9 +133,9 @@ sub parse_assignment_file {
 
   my %file = %{parse_config_file($file, 'text', 'validators', @lists)};
 
-  $file{$_} = date($file{$_}) for ('due', 'hidden_until');
-  defined $file{$_} or $file{$_} = ""
-    for ('due', 'hidden_until', 'text_file', 'text', 'file_count');
+  $file{$_} = date($file{$_}) for ('due', 'late_after', 'hidden_until');
+  defined $file{$_} or $file{$_} = "" for (
+    'due', 'late_after', 'hidden_until', 'text_file', 'text', 'file_count');
 
   return AssignmentConfig->new(%file, misc=>\%file);
 }

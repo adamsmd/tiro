@@ -44,6 +44,7 @@ Future features:
  - select subset of checkers to run
  - detailed sort-by
  - Separate upload page (so full assignment can be listed)
+ - Admin only features get pink background?
 
 * Unsorted
  - Validation
@@ -67,15 +68,14 @@ Future features:
  + error -> factor render code
  - .error shown only to admins and claimed rejected to students
  - Disclaimer at the end of test.pl
- - Admin only features get pink background?
  - log viewer (bin/)
 
- - Admin sees non-admin view (drop box in user display?)
+ + Admin sees non-admin view (drop box in user display?)
  + Tiro directories as read only
  - Symlink and collection scripts
  + Log filenames with date in them
- - late_after: ...
- - Username in log line
+ + late_after: ...
+ + Username in log line
  - Max number of submissions and default_max_number_of_submissions
  - max_upload_size and default_max_upload_size
  - PID breaks if alternate servers (include hostname, but local networks)

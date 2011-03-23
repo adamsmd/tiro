@@ -41,7 +41,7 @@ struct Upload=>{name=>'$', handle=>'$'};
 
 my $start_time = time();
 
-set_progname("tiro.cgi (PID:$$)");
+set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})");
 
 my $config = parse_global_config_file(CONFIG_FILE);
 
@@ -54,7 +54,7 @@ if ($config->log_file ne "") {
   carpout($LOG_FILE);
 }
 
-warn "*** Starting tiro.cgi ***";
+warn "+++ Starting tiro.cgi +++";
 
 $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
@@ -63,9 +63,9 @@ panic($q->cgi_error()) if $q->cgi_error();
 
 exists $ENV{$_} and warn("$_: ", $ENV{$_}) for
   ("REMOTE_HOST", "REMOTE_USER", "HTTP_REFERER", "HTTP_X_FORWARDED_FOR");
-warn "Param $_: ", join(":",$q->param($_)) for $q->param();
+warn "PARAM $_: ", join(":",$q->param($_)) for $q->param();
 
-my @all_users = sort {$a->name cmp $b->name} parse_user_configs($config);
+my @real_all_users = sort {$a->name cmp $b->name} parse_user_configs($config);
 
 ################
 # Input Parsing
@@ -85,7 +85,7 @@ define_param(
   show_search_results => \&bool,
   start_date => \&date, end_date => \&date,
   only_latest => \&bool, validation => \&bool,
-  submitted => \&keyword, sort_by => \&keyword);
+  submitted => \&keyword, sort_by => \&keyword, user_override => \&file);
 use constant {
   SUBMITTED_YES=>"sub_yes", SUBMITTED_NO=>"sub_no", SUBMITTED_ANY=>"sub_any",
   SORT_ASSIGNMENT=>'sort_assignment', SORT_USER=>'sort_user',
@@ -93,11 +93,16 @@ use constant {
 
 # Complex Inputs
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
-my $login_name = file($tainted_user);
-my ($login) = grep {$_->name eq $login_name} @all_users;
-@all_users = (not $login) ? () : $login->is_admin ? @all_users : ($login);
+my $login_name = my $real_login_name = file($tainted_user);
+my ($login) = my ($real_login) = grep {$_->name eq $login_name} @real_all_users;
+if ($login->is_admin && user_override() ne "") {
+  $login_name = user_override();
+  ($login) = grep {$_->name eq $login_name} @real_all_users;
+}
+my @all_users =
+  (not $login) ? () : $login->is_admin ? @real_all_users : ($login);
 
-use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
+use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file', SWITCH_USER => "su" };
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->name} @all_users;
 @users = intersect(\@all_users, sub {$_[0]->name}, \@users);
 
@@ -137,7 +142,7 @@ logged_exit();
 ################
 
 sub logged_exit {
-  warn "*** Stopping tiro.cgi ***";
+  warn "--- Stopping tiro.cgi ---";
   exit 0;
 }
 
@@ -253,8 +258,22 @@ sub render {
   .hidden_until { color:red; }
 EOT
 
+  my $user_name = $login_name;
+  if ($real_login->is_admin) {
+    $user_name = $q->popup_menu(
+      USER_OVERRIDE(), [map {$_->name} @real_all_users], $login_name);
+    $user_name .= $q->submit(-value=>'Change user');
+    for ($q->param) {
+      $user_name .= "\n" . $q->hidden(-name=>$_, -default=>$q->param($_))
+        if $_ ne USER_OVERRIDE();
+    }
+  }
+
+  say $q->start_form(-action=>"?".$q->query_string, -method=>'GET');
   say $q->div({-class=>'welcome'},
-              "Welcome $login_name<br>Current time is", pretty_date($now));
+              "Welcome $user_name<br>Current time is", pretty_date($now));
+  say $q->end_form();
+
   say $q->h1($config->title);
 
   say $q->start_div({-class=>'navbar'});
@@ -264,8 +283,8 @@ EOT
   foreach my $a (@all_assignments) {
     my $num_done = (grep { @$_ } @{$a->dates});
     my $num_users = @all_users;
-    my $late = ($a->due ne "" and ($now ge $a->due) and
-                not any {any {$_ le $a->due} @$_} @{$a->dates});
+    my $late = (late_after($a) ne "" and $now ge late_after($a) and
+                not any {any {$_ le late_after($a)} @$_} @{$a->dates});
     say row(0, 1, href(form_url(SHOW_UPLOAD_FORM(), 1, SHOW_SEARCH_RESULTS(), 1,
                                 ASSIGNMENTS, $a->name),
                        $a->name . ": ", $a->title),
@@ -288,6 +307,7 @@ EOT
   say $q->h3("... or", href(form_url(SHOW_SEARCH_FORM(), 1), "Search"));
   if (show_search_form()) {
     say $q->start_form(-action=>'#', -method=>'GET');
+    say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
     say $q->hidden(-name=>SHOW_SEARCH_FORM(), -default=>1);
     say $q->hidden(-name=>SHOW_SEARCH_RESULTS(), -default=>1);
     say $q->start_table({-class=>'search'});
@@ -344,6 +364,7 @@ sub body {
       if ($a->file_count ne "") {
         say $q->start_form(
           -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
+        say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
         say $q->hidden(-name=>ASSIGNMENTS, -value=>$a->name, -override=>1);
         say $q->hidden(-name=>VALIDATION(), -value=>1, -override=>1);
         say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
@@ -379,7 +400,8 @@ sub body {
                                       SHOW_SEARCH_RESULTS(), 1),
                              pretty_date($r->date)) .
                         (($r->assignment ne "" and
-                          $r->date gt $r->assignment->due) ? " (Late)" : ""))
+                          $r->date gt late_after($r->assignment)) ?
+                         " (Late)" : ""))
                        : ("(Nothing submitted)"))], @file_rows);
 
         if (validation() and $r->date) {
@@ -402,6 +424,7 @@ sub body {
               $config->assignments_dir, $r->assignment->path);
             $ENV{'TIRO_ASSIGNMENT_NAME'} = $r->assignment->name;
             $ENV{'TIRO_ASSIGNMENT_TITLE'} = $r->assignment->title;
+            $ENV{'TIRO_ASSIGNMENT_LATE_AFTER'} = $r->assignment->late_after;
             $ENV{'TIRO_ASSIGNMENT_DUE'} = $r->assignment->due;
             $ENV{'TIRO_ASSIGNMENT_FILE_COUNT'} = $r->assignment->file_count;
 
@@ -429,6 +452,10 @@ sub body {
 ################
 # Listings
 ################
+
+sub late_after {
+  $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due;
+}
 
 sub list_assignments {
   map { my $path = $_;
@@ -482,7 +509,11 @@ sub define_param {
   }
 }
 
-sub form_url { my %args = @_; "?" . join "&", map {"$_=$args{$_}"} keys %args }
+sub form_url {
+  my %args = @_;
+  $args{USER_OVERRIDE()} = user_override() if $real_login_name ne $login_name;
+  return "?" . join "&", map {"$_=$args{$_}"} keys %args;
+}
 
 sub pretty_date { UnixDate($_[0], $config->date_format) }
 
