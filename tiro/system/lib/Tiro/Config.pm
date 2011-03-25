@@ -79,7 +79,7 @@ my %global_config_default = (
   #user_override => 'user1',
   #users => { user1 => { full_name => 'Demo User #1', expires=>'tomorrow'} },
   #users_file=>"users.csv",
-  #user_name_column=>0, user_full_name_column=>1, user_expires_column=>2,
+  #user_id_column=>0, user_full_name_column=>1, user_expires_column=>2,
   users_header_lines=>0,
   );
 
@@ -91,12 +91,12 @@ struct GlobalConfig=>{
   max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
   user_override=>'$', users=>'*%', users_file=>'$',
-  user_name_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
+  user_id_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
   users_header_lines=>'$',
   text=>'$', misc=>'%' };
-struct UserConfig=>{name=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
+struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
 struct AssignmentConfig=>{
-  name=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
+  id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', validators=>'@',
   text=>'$', misc=>'%'};
 
@@ -155,12 +155,12 @@ sub parse_user_configs {
     for (drop($global_config->users_header_lines || 0,
               split("\n", slurp $global_config->users_file))) {
       my @words = quotewords(",", 0, $_);
-      my $name = $words[$global_config->user_name_column];
+      my $id = $words[$global_config->user_id_column];
       my $full_name = $words[$global_config->user_full_name_column];
       my $expires = $global_config->user_expires_column eq "" ?
         'tomorrow' : $words[$global_config->user_expires_column];
-      if (defined $name and defined $full_name and defined $expires) {
-        $users{$name} = { full_name => $full_name, expires => $expires };
+      if (defined $id and defined $full_name and defined $expires) {
+        $users{$id} = { full_name => $full_name, expires => $expires };
       }
     }
   }
@@ -168,7 +168,7 @@ sub parse_user_configs {
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
-  return map { UserConfig->new(name => $_, %{$users{$_}}); } (keys %users);
+  return map { UserConfig->new(id => $_, %{$users{$_}}); } (keys %users);
 }
 
 =head2 parse_config_file
@@ -180,7 +180,10 @@ sub parse_user_configs {
 
 sub parse_config_file {
   my ($filename, $body_name, @lists) = @_;
-  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n\s*(.*))?$/s;
+#  my ($lines, $body) = split(/^\s*$/m, slurp($filename), 2);
+#  my ($lines, $body) = slurp($filename) =~ /(^.*?\n|^)(?:\s*\n\s*(.*))?$/s;
+#  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n\s*(.*))?$/s;
+  my ($lines, $body) = split(/^\n/m, slurp($filename), 2);
   my %hash = map { ($_, []) } @lists;
   for (split "\n", $lines) {
     my ($key, $value) = /^\s*([^:]*?)\s*:\s*(.*?)\s*$/;

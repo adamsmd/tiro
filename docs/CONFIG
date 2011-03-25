@@ -1,0 +1,132 @@
+## Configuration ##
+
+There are three sorts of configuration for Tiro:
+ - global configuration,
+ - assignment configuration, and
+ - user configuration.
+
+Global configurations are stored in system/config.cfg.  (This is
+determined by the CONFIG_FILE constant in tiro.cgi and can be changed
+if you wish.)
+
+Assignment configurations are files stored in the assignments/ directory.
+Each file in the assignments/ folder represents a single assignment
+and contains the configuration for that assignment.
+
+User configurations are stored in the CSV (comma-separated value) file
+specified by the 'users_file' setting in the global configuration.
+Additional users can also be specified directly in the global
+configuration.
+
+## Configuration File Format ##
+
+Both the global configuration file and the assignment configuration
+files use the same format.  A configuration file start with a header
+made up of multiple lines.  The header ends at the first blank line.
+(A line with only white space counts as a blank line.)  Everything
+after the header counts as the body.  The body is unstructured text.
+
+Header lines consist of a key and a value separated by the first
+colon (':') on the line.
+White space at the start and end of the key and value is trimmed
+and ignored.
+The same key may be duplicated multiple times.
+For keys representing scalar properties, only the last value has effect.
+But for keys representing list properties, each value becomes
+a separate element of the list.
+
+Header lines that don't contain colons are ignored.  So any line that
+doesn't contain a colon or uses an unknown key is effectively a
+comment.  In general keys should not start with hash ('#') so that
+lines starting with a hash are effectively always comments regardless
+of whether they contain a colon.
+
+## Global Configuration
+
+By default the global configuration is stored in system/config.cfg,
+but this can be overridden by setting CONFIG_FILE in tiro.cgi.
+
+title (required): The title that should be displayed at the top of all pages.
+
+working_dir (defaults to the same directory):
+  the working directory from which tiro.cgi should
+path (defaults to /usr/local/bin:/usr/bin:/bin): 
+ - path: (String) The environment PATH that checkers should run with.
+max_post_size (defaults to 10000):
+ - post_max: (Integer) The maximum number of bytes allowed to be uploaded.
+date_format (defaults to "%a, %b %d %Y, %r"):
+log_file (defaults to "system/log/log-%Y-%m-%d.txt"):
+
+assignments_dir (defaults to "assignments"):
+  The path to the directory containing folder configuration files.
+assignments_regex (defaults to "^(\w+)\.cfg$"):
+ - folder_configs_ignore: (String) A Perl regular expression.  Files in the
+   folder_configs directory are ignored if they match this regular expression.
+submissions_dir (defaults to "submissions"):
+
+admins (list, defaults to the empty list):
+ - admins: (List of String) The users that are application administrators.
+     They can see uploads by other users.
+user_override (defaults to the empty string):
+users (list, defaults to the empty list):
+ - users: (Dictionary) Maps each usernames (as a string) to
+   a dictionary that represents the configuration settings for that user.
+   That dictionary contains the following keys mapping to the described values.
+   - full_name: (String) The full name of the user.
+     Only used for display purposes.
+   - expires: (String) The date afterwhich this user should no longer be
+     allowed access.  Any date format parsable by Date::Manip is allowed.
+users_file (defaults to the empty string):
+user_name_column (defaults to the empty string):
+user_full_name_column (defaults to the empty string):
+user_expires_column (defaults to the empty string):
+users_header_lines (defaults to "0"):
+
+text (defaults to the empty string)
+misc
+
+Most configuration will have only the following settings:
+ TODO
+
+## Assignment Configuration ##
+
+The identifier for the folder configuration is taken from the file name
+of the folder configuration file.
+
+By default assignments are stored in the assignments/ folder, but this
+can be overridden by setting assignments_dir in the global
+configuration file.
+
+  assignments_dir => 'assignments',
+  assignments_regex => qr[^(\w+)\.cfg$],
+
+
+
+title (required): The assignment title
+- title: (String) The friendly name for the folder.  Only used for display purposes.
+
+hidden_until (defaults to the empty string):
+due (defaults to the empty string):
+- due: (String) The date that the folder is due.  Any date format parsabel by Date::Manip is allowed.
+file_count (defaults to the empty string):
+- file_count: (Number) The number of file uploads to allow.
+validators (list, defaults to the empty list):
+- checkers: (Array) A list of checkers to run on submissions for this folder.
+    Each element of the array is itself a two element array.
+    - The first element is a string indicating the name of the checker.
+      The first element only used for display purposes.
+    - The second element is the program to run for the checker and
+      is represented as an array of strings.
+      The first string is the program the other strings are the arguments
+      to the program.  The directory containing a particular submission
+      is passed as a final argument after the arguments specified in this array.
+
+text_file (defaults to the empty string):
+
+text (defaults to the empty string)
+- text: (String) HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a <div> and is usually a description of the folder or any special instructions the user should now before uploading.
+misc
+
+## User Configuration ##
+
+## Validators ##

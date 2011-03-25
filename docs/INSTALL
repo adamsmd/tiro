@@ -1,0 +1,33 @@
+## Requirements:
+  Perl 5.8 or later
+  A web server with CGI and HTTP authentication
+    (Apache with SSL is prefered.)
+  Date::Manip (TODO link and version)
+  File::Slurp (TODO link and version)
+  List::MoreUtils (TODO link and version)
+
+
+## Quick Installation
+./system/bin/install DST URL PERM
+
+## Manual Installation
+- Create a directory under your cgi-pub for tiro.  Say, cgi-pub/tiro/.
+- Copy the tiro.cgi file as wells as the
+  assignments, submissions and system directories.
+
+- VERY IMPORTANT: Configure your folder permissions.
+  On Apache this is done via .htaccess.
+  TODO.
+  Set permissions.
+
+- Configure your server to use HTTPS authentication
+  - On most Apache installations this is as simple as editing
+    cgi-pub/.htaccess to contain the following lines and making sure
+    the .htaccess has group and world read permissions:
+      <Files tiro.cgi>
+      AuthType KerberosV5
+      AuthName "UITS Network ID"
+      Require valid-user
+      </Files>
+
+- Configure your installation.  See the Configuration section of this document.

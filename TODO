@@ -24,21 +24,20 @@ Future features:
  - user alias creator
  - submission collector
    - all, late, not-late
+   - Alternate Heierachry via Soft Links
  - log file interpreter
  - grade display
 
-* Critical
- - error() is a render method
- - nicely format "normal" errors
+* Non-critical
  - Server Time offset (via timezones?)
  - Report back search params
-
-* Non-critical
  - Download tar-ball.
  - Hilight sorted column
  - Clickable sorted column
  - file size with commas
  - Put "multi-selectable" under Users and Folders search box
+ - Display all submissions after upload (but not test all)
+   - Link to show all submissions?
 
 * Rejected ideas (unless someone has a good reason to include them)
  - select subset of checkers to run
@@ -47,28 +46,22 @@ Future features:
  - Admin only features get pink background?
 
 * Unsorted
- - Validation
+ ~ Validation
    - Search for only valid
    - (late, rejected)
    - grey out invalid
+   - .error shown only to admins and claimed rejected to students
  - "Select Assignment":
    - hierarchical assignment grouping: # group: Labs -- Extra
    - Custom Assignment Order
    - oldest vs newest first
- - Alternate Heierachry via Soft Links
- - Fix strange formatting when blank config file
- - Fix error when blank line at start of config file
- - Display all submissions after upload (but not test all)
-   - Link to show all submissions?
+ + Fix strange formatting when blank config file
+ + Fix error when blank line at start of config file
  - What happens if a student spams the system?
    - max submits per assignment
  - Default config should comment out or only have universal defaults
 
- + error -> panic
- + error -> factor render code
- - .error shown only to admins and claimed rejected to students
- - Disclaimer at the end of test.pl
- - log viewer (bin/)
+ ~ Disclaimer at the end of test.pl
 
  + Admin sees non-admin view (drop box in user display?)
  + Tiro directories as read only

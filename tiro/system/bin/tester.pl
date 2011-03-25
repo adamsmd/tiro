@@ -35,22 +35,3 @@ say "<tr><td colspan=2 $gray>",
     $len ? "Passed $passed of $len tests" : "(No tests)", "</td></tr>";
 
 say "</table>";
-
-sub parse_config {
-  my ($filename, $body_name, @lists) = @_;
-  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n(.*))?$/s;
-  my %hash = map { ($_, []) } @lists;
-  for (split "\n", $lines) {
-    my ($key, $value) = /^\s*([^:]*?)\s*:\s*(.*?)\s*$/;
-    if (defined $key and defined $value) {
-      if (grep { $_ eq $key } @lists) {
-        push @{$hash{$key}}, $value;
-      } else {
-        $hash{$key} = $value;
-      }
-    }
-  }
-  $hash{$body_name} =
-    ($hash{$body_name} || "") . (($body || "") =~ /\S/ ? $body : "");
-  return \%hash;
-}
