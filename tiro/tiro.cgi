@@ -12,7 +12,7 @@ use lib 'system/lib';
 # Modules from Core
 use CGI qw(-private_tempfiles -nosticky);
 use CGI::Carp qw(carpout set_progname);
-use Carp qw(verbose);
+use Carp;
 use Class::Struct;
 use File::Copy qw(copy move); # NOTE: move() has tainting issues
 use File::Path qw(mkpath);
@@ -145,7 +145,7 @@ else { main_view(); }
 ################
 
 sub logged_exit { warn "--- Stopping tiro.cgi ---"; exit 0; }
-sub warn_at_line { my $x = (caller(1))[2]; warn @_, " (At line $x)"; $x }
+sub warn_at_line { my $x = (caller(1))[2]; warn @_, " at line $x.\n"; $x }
 
 sub panic { # Prints error without navigation components
   my $line = warn_at_line(@_);
