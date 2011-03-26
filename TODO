@@ -46,11 +46,11 @@ Future features:
  - Admin only features get pink background?
 
 * Unsorted
- ~ Validation
-   - Search for only valid
-   - (late, rejected)
+ + Sanity Checks
+   + Search for only sane
+   + (late) - FAILED
    - grey out invalid
-   - .error shown only to admins and claimed rejected to students
+   + .tmp shown only to admins and claimed rejected to students
  - "Select Assignment":
    - hierarchical assignment grouping: # group: Labs -- Extra
    - Custom Assignment Order
@@ -59,6 +59,8 @@ Future features:
  + Fix error when blank line at start of config file
  - What happens if a student spams the system?
    - max submits per assignment
+   - Max number of submissions and default_max_number_of_submissions
+   - max_upload_size and default_max_upload_size
  - Default config should comment out or only have universal defaults
 
  ~ Disclaimer at the end of test.pl
@@ -69,6 +71,4 @@ Future features:
  + Log filenames with date in them
  + late_after: ...
  + Username in log line
- - Max number of submissions and default_max_number_of_submissions
- - max_upload_size and default_max_upload_size
  - PID breaks if alternate servers (include hostname, but local networks)

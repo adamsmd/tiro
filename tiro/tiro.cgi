@@ -14,7 +14,7 @@ use CGI qw(-private_tempfiles -nosticky);
 use CGI::Carp qw(carpout set_progname);
 use Carp qw(verbose);
 use Class::Struct;
-use File::Copy qw(copy); # NOTE: move() has tainting issues
+use File::Copy qw(copy move); # NOTE: move() has tainting issues
 use File::Path qw(mkpath);
 use File::Spec::Functions;
 use Time::HiRes qw(time);
@@ -91,38 +91,38 @@ use constant {
   SORT_ASSIGNMENT=>'sort_assignment', SORT_USER=>'sort_user',
   SORT_DATE=>'sort_date', SORT_FULL_NAME=>'sort_full_name'};
 
-# Complex Inputs
+# Login
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
 my $login_id = my $real_login_id = file($tainted_user);
 my ($login) = my ($real_login) = grep {$_->id eq $login_id} @real_all_users;
 
-panic('Malformed login id "' . $tainted_user . '".', "Missing .htaccess?")
+panic('Malformed login id "' . $tainted_user . '".', "Missing HTTPS?")
   unless $login_id;
 panic("No such user: $login_id")
   unless defined $login;
-panic("Access for $login_id expired as of ", $login->expires)
-  unless $now lt date($login->expires);
+panic("Access for $login_id expired on ", $login->expires)
+  unless $now lt $login->expires;
 
 if ($login->is_admin && user_override() ne "") {
   $login_id = user_override();
   ($login) = grep {$_->id eq $login_id} @real_all_users;
+  panic('Malformed login override "' . $login_id . '".') unless $login;
 }
-my @all_users =
-  (not $login) ? () : $login->is_admin ? @real_all_users : ($login);
 
+my @all_users = $login->is_admin ? @real_all_users : ($login);
+my @all_assignments = $login->is_admin ? list_assignments() :
+  grep { $_->hidden_until le $now } list_assignments();
+
+# Other inputs
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
 my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->id} @all_users;
 @users = intersect(\@all_users, sub {$_[0]->id}, \@users);
-
-my @all_assignments = list_assignments();
-@all_assignments = grep {
-  $login->is_admin or ($_->hidden_until || "") le $now } @all_assignments;
 
 my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->id}, \@assignments);
 
 my $download = file $q->param(FILE);
-my @uploads = map {Upload->new(id=>file($_), handle=>$_)} ($q->upload(FILE));
+my @uploads = map {Upload->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 
 $ENV{'TZ'} = Date_TimeZone(); # make validators see the timezone
 
@@ -130,22 +130,22 @@ $ENV{'TZ'} = Date_TimeZone(); # make validators see the timezone
 # Main Code
 ################
 
-error('Invalid file names (only "A-Za-z0-9_. -" characters allowed):',
-      $q->param(FILE))
+error('Invalid file names (only "A-Za-z0-9_. -" characters allowed): ',
+      join(", ", $q->param(FILE)))
   unless not any { not defined $_->name } @uploads;
-error("Duplicate file names:", map { $_->name } @uploads)
+error('Duplicate file names: ', map { $_->name } @uploads)
   unless (map { $_->name } @uploads) == (uniq map { $_->name } @uploads);
 
 if (do_download()) { download(); }
 elsif (do_upload()) { upload(); }
-else { render(search_results()); }
+else { main_view(); }
 
 ################
 # Actions
 ################
 
 sub logged_exit { warn "--- Stopping tiro.cgi ---"; exit 0; }
-sub warn_at_line { my $l = (caller(1))[2]; warn @_, " (At line $l)"; $l }
+sub warn_at_line { my $x = (caller(1))[2]; warn @_, " (At line $x)"; $x }
 
 sub panic { # Prints error without navigation components
   my $line = warn_at_line(@_);
@@ -183,8 +183,9 @@ sub upload {
   @uploads or error("No files selected for upload.");
   my $assignment = $assignments[0] or error("No assignment for upload.");
 
-  my $target_dir = filename($assignment->id, $login_id, "$now.tmp");
-  warn "Starting upload of $_ in $target_dir" for @uploads;
+  my $date = "$now.tmp";
+  my $target_dir = filename($assignment->id, $login_id, $date);
+  warn "Starting upload of @{[$_->name]} in $target_dir" for @uploads;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->id]} for " .
                                "$login_id at $now: $!");
   my $umask = umask 0377;
@@ -197,47 +198,22 @@ sub upload {
   chmod 0500, $target_dir;
   warn "Upload done for $_ (@{[-s catfile($target_dir, $_)]} bytes)" .
     " in $target_dir" for dir_list($target_dir);
-  my ($error, $msg) = (0, "");
-#  for my $check ($assignment->checkers) {
-#    foo($assignment, $user, $date);
-#    $x .= `$check`;
-#    $error ||= $?;
-#  }
-  if ($error) { error("Upload failed:"); }
-  move($target_dir, filename($assignment->id, $login_id, "$now.tmp")) or
+  my ($error, @msg) = (0);
+  for my $test (@{$assignment->sanity_tests}) {
+    set_env($assignment, $login, $date);
+    warn "Running sanity test: $test";
+    push @msg, `$test`;
+    $error ||= $?;
+    warn "Exit code: $?";
+  }
+  if ($error) { error("Upload failed:", @msg); }
+  move($target_dir, filename($assignment->id, $login_id, $now)) or
     error("Can't move TODO: $!");
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
       -uri=>form_url(SHOW_RESULTS(), 1, VALIDATION(), validation(),
                      ASSIGNMENTS, $assignment->id, USERS, $login_id,
                      START_DATE(), $now, END_DATE(), $now));
-}
-
-sub search_results {
-  my @rows;
-  for my $assignment (@assignments) {
-    for my $user (@users) {
-      my @dates = list_dates($assignment->id, $user->id);
-      push @rows, Row->new(assignment=>$assignment, user=>$user,
-                           date=>'', files=>[], late=>0)
-        if submitted() ne SUBMITTED_YES and not @dates;
-      for (@dates) {
-        push @rows, Row->new(
-          assignment=>$assignment, user=>$user, date=>$_->[0],
-          files=>[list_files($assignment, $user, $_->[0].$_->[1])],
-          late=>($_->[0] gt late_after($assignment)), failed=>$_->[1] ne "")
-          if submitted() ne SUBMITTED_NO;
-      }
-    }
-  }
-
-  return sort {(sort_by() eq SORT_USER and $a->user->id cmp $b->user->id)
-                 or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
-                 or (sort_by() eq SORT_FULL_NAME
-                     and $a->user->full_name cmp $b->user->full_name)
-                 or ($a->assignment->id cmp $b->assignment->id)
-                 or ($a->user->id cmp $b->user->id)
-                 or ($a->date cmp $b->date) } @rows;
 }
 
 sub pre_body {
@@ -274,7 +250,7 @@ EOT
     $user_id .= $q->submit(-value=>'Change user');
     for ($q->param) {
       $user_id .= "\n" . $q->hidden(-name=>$_, -default=>$q->param($_))
-        if $_ ne USER_OVERRIDE();
+        if $_ ne FILE() and $_ ne USER_OVERRIDE();
     }
   }
 
@@ -294,21 +270,18 @@ EOT
     my $num_users = @all_users;
     my $late = (late_after($a) ne "" and $now ge late_after($a) and
                 not any {any {$_ le late_after($a)} @$_} @{$a->dates});
-    say row(0, 1, href(form_url(SHOW_UPLOAD_FORM(), 1, SHOW_RESULTS(), 1,
-                                ASSIGNMENTS, $a->id),
-                       $a->id . ": ", $a->title),
+    say row(1, href(form_url(SHOW_UPLOAD_FORM(), 1, SHOW_RESULTS(), 1,
+                             ASSIGNMENTS, $a->id), $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
-            ($login->is_admin ?
-             $q->small("&nbsp;($num_done/$num_users)") : "") .
+            ($login->is_admin ? $q->small("&nbsp;($num_done/$num_users)"):"") .
             ($late ? "&nbsp;Late" : ""));
-    say row(0, 2, $q->small("&nbsp;&nbsp;Due " . pretty_date($a->due)))
+    say row(2, $q->small("&ensp;Due ", pretty_date($a->due)))
       unless $a->due eq "";
-    say row(0, 2, $q->small({-class=>'hidden_until'},
-                            "&nbsp;&nbsp;Hidden until " .
-                            pretty_date($a->hidden_until)))
+    say row(2, $q->small({-class=>'hidden_until'},
+                         "&ensp;Hidden until", pretty_date($a->hidden_until)))
       unless $a->hidden_until lt $now;
   }
-  say row(0, 1, "(No assignments yet)") unless @all_assignments;
+  say row(1, "(No assignments yet)") unless @all_assignments;
   say $q->end_table();
 
   say $q->h3("... or", href(form_url(), "Start Over"));
@@ -320,13 +293,14 @@ EOT
     say $q->hidden(-name=>SHOW_SEARCH_FORM(), -default=>1);
     say $q->hidden(-name=>SHOW_RESULTS(), -default=>1);
     say $q->start_table({-class=>'search'});
-    map { say row(0, 1, @$_) } (
+    map { say row(1, @$_) } (
       ["User:", multilist(USERS, map {$_->id} @all_users)],
       ["Assignment:", multilist(ASSIGNMENTS, map {$_->id} @all_assignments)],
-      ["Show:", boxes([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
+      ["Show:", join($q->br(), map {$q->checkbox($_->[0],$_->[1],'y',$_->[2])}
+                     ([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
                       [SHOW_UPLOAD_FORM(), show_upload_form(), 'Upload Form'],
                       [VALIDATION(), validation(), 'Validation'],
-                      [SHOW_FAILED(), show_failed(), 'Failed Uploads'])],
+                      [SHOW_FAILED(), show_failed(), 'Failed Uploads']))],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
       ["<b>Advanced</b>", ""],
@@ -361,8 +335,32 @@ sub post_body {
   logged_exit();
 }
 
-sub render {
-  my (@rows) = @_;
+sub main_view {
+  my @rows;
+  for my $assignment (@assignments) {
+    for my $user (@users) {
+      my @dates = list_dates($assignment->id, $user->id);
+      push @rows, Row->new(assignment=>$assignment, user=>$user,
+                           date=>'', files=>[], late=>0)
+        if submitted() ne SUBMITTED_YES and not @dates;
+      for (@dates) {
+        push @rows, Row->new(
+          assignment=>$assignment, user=>$user, date=>$_->[0],
+          files=>[list_files($assignment, $user, $_->[0].$_->[1])],
+          late=>($_->[0] gt late_after($assignment)), failed=>$_->[1] ne "")
+          if submitted() ne SUBMITTED_NO;
+      }
+    }
+  }
+
+  @rows = sort {(sort_by() eq SORT_USER and $a->user->id cmp $b->user->id)
+                  or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
+                  or (sort_by() eq SORT_FULL_NAME
+                      and $a->user->full_name cmp $b->user->full_name)
+                  or ($a->assignment->id cmp $b->assignment->id)
+                  or ($a->user->id cmp $b->user->id)
+                  or ($a->date cmp $b->date) } @rows;
+
   pre_body();
 
   if (show_upload_form()) {
@@ -396,8 +394,8 @@ sub render {
     say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
                                  "Validation", "Files", "Bytes"])));
     if (not @rows) {
-      say row(0, 7, $q->center('No results to display.',
-                               'Browse or search to select assignment.'));
+      say row(7, $q->center('No results to display.',
+                            'Browse or search to select assignment.'));
     } else {
       for my $r (@rows) {
         say $q->start_tbody();
@@ -424,10 +422,11 @@ sub render {
             say "Submission received on @{[pretty_date($r->date)]}.";
             say '</td></tr>';
           } else {
-            foo($r->assignment, $r->user, $r->date);
-            for my $validator (@{$r->assignment->validators}) {
+            set_env($r->assignment, $r->user, $r->date);
+            for my $validator (@{$r->assignment->sanity_tests},
+                               @{$r->assignment->validators}) {
               say "<tr><td></td><td colspan=7><div>";
-              warn "Running: $validator";
+              warn "Running sanity test or validator: $validator";
               system $validator;
               warn "Exit code: $?";
               say "</div></td></tr>";
@@ -444,7 +443,7 @@ sub render {
   post_body();
 }
 
-sub foo {
+sub set_env {
   my ($assignment, $user, $date) = @_;
   $ENV{'TIRO_CONFIG_FILE'} = CONFIG_FILE;
   $ENV{'TIRO_LOGIN_ID'} = $login_id;
@@ -536,10 +535,6 @@ sub multilist {
                      -values=>[@_[1..$#_]], -default=>[@_[1..$#_]]);
 }
 
-sub boxes {
-  join $q->br(), map { $q->checkbox($_->[0], $_->[1], 'on', $_->[2]) } @_;
-}
-
 sub radio {
   my ($name, $def, @rest) = @_;
   scalar($q->radio_group(-columns=>1, -name=>$name, -default=>$rest[$def][0],
@@ -547,11 +542,7 @@ sub radio {
                          -labels=>{map { @$_ } @rest}));
 }
 
-sub row {
-  my ($pre, $span, @data) = @_;
-  $q->Tr(($pre ? $q->td({-colspan=>$pre}) : ()),
-         $q->td({-colspan=>$span}, [@data]))
-}
+sub row { $q->Tr($q->td({-colspan=>$_[0]}, [@_[1..$#_]])) }
 
 sub multirow {
   my ($prefix, @rows) = @_;

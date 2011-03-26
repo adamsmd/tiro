@@ -98,7 +98,7 @@ struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
 struct AssignmentConfig=>{
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', validators=>'@',
-  text=>'$', misc=>'%'};
+  sanity_tests=>'@', text=>'$', misc=>'%'};
 
 =head2 parse_global_config_file
 
@@ -110,7 +110,7 @@ sub parse_global_config_file {
   my %config = %global_config_default;
 
   if (defined $file) {
-    my %c = %{parse_config_file($file, 'text', 'admins', 'users', @lists)};
+    my %c = parse_config_file($file, 'text', 'admins', 'users', @lists);
 
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
@@ -131,7 +131,8 @@ sub parse_global_config_file {
 sub parse_assignment_file {
   my ($file, @lists) = @_;
 
-  my %file = %{parse_config_file($file, 'text', 'validators', @lists)};
+  my %file = parse_config_file(
+    $file, 'text', 'validators', 'sanity_tests', @lists);
 
   $file{$_} = date($file{$_}) for ('due', 'late_after', 'hidden_until');
   defined $file{$_} or $file{$_} = "" for (
@@ -167,6 +168,7 @@ sub parse_user_configs {
 
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
+  $users{$_}->{'expires'} = date($users{$_}->{'expires'}) for keys %users;
 
   return map { UserConfig->new(id => $_, %{$users{$_}}); } (keys %users);
 }
@@ -180,9 +182,6 @@ sub parse_user_configs {
 
 sub parse_config_file {
   my ($filename, $body_name, @lists) = @_;
-#  my ($lines, $body) = split(/^\s*$/m, slurp($filename), 2);
-#  my ($lines, $body) = slurp($filename) =~ /(^.*?\n|^)(?:\s*\n\s*(.*))?$/s;
-#  my ($lines, $body) = slurp($filename) =~ /^(.*?)(?:\n\s*\n\s*(.*))?$/s;
   my ($lines, $body) = split(/^\n/m, slurp($filename), 2);
   my %hash = map { ($_, []) } @lists;
   for (split "\n", $lines) {
@@ -196,7 +195,7 @@ sub parse_config_file {
     }
   }
   $hash{$body_name} = ($hash{$body_name} || "") . ($body || "");
-  return \%hash;
+  return %hash;
 }
 
 =head1 AUTHOR

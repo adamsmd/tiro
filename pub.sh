@@ -6,12 +6,12 @@ AUTH_TYPE=KerberosV5
 AUTH_NAME="UITS Network ID"
 HTTPS_URL='https://www.cs.indiana.edu/~adamsmd/cgi-pub/tiro/tiro.cgi'
 
-rm -f system/log/log.txt
+rm -f tiro/system/log/log-*.txt
 
-cp tiro.cgi $DST/
-cp -r system $DST
-cp -r assignments $DST
-cp -r submissions $DST
+cp tiro/tiro.cgi $DST/
+cp -r tiro/system $DST
+cp -r tiro/assignments $DST
+cp -r tiro/submissions $DST
 
 cat <<EOF >$DST/.htaccess
 SSLRequireSSL
