@@ -5,13 +5,13 @@ There are three sorts of configuration for Tiro:
  - assignment configuration, and
  - user configuration.
 
-Global configurations are stored in system/config.cfg.  (This is
+Global configurations are stored in tiro/system/config.cfg.  (This is
 determined by the CONFIG_FILE constant in tiro.cgi and can be changed
 if you wish.)
 
-Assignment configurations are files stored in the assignments/ directory.
-Each file in the assignments/ folder represents a single assignment
-and contains the configuration for that assignment.
+Assignment configurations are files stored in the tiro/assignments/
+directory.  Each file in the tiro/assignments/ folder represents a
+single assignment and contains the configuration for that assignment.
 
 User configurations are stored in the CSV (comma-separated value) file
 specified by the 'users_file' setting in the global configuration.
@@ -22,54 +22,93 @@ configuration.
 
 Both the global configuration file and the assignment configuration
 files use the same format.  A configuration file start with a header
-made up of multiple lines.  The header ends at the first blank line.
-(A line with only white space counts as a blank line.)  Everything
-after the header counts as the body.  The body is unstructured text.
+made up of multiple header lines.  The header ends at the first blank
+line.  (Any line with only white space counts as a blank line.)
+Everything after the header counts as the body.  The body is
+unstructured HTML.
 
-Header lines consist of a key and a value separated by the first
-colon (':') on the line.
-White space at the start and end of the key and value is trimmed
-and ignored.
-The same key may be duplicated multiple times.
-For keys representing scalar properties, only the last value has effect.
-But for keys representing list properties, each value becomes
-a separate element of the list.
+Header lines consist of a key and a value separated by the first colon
+(':') on the line.  White space at the start and end of the key and
+value is ignored.  The same key may be duplicated multiple times.  For
+keys representing scalar properties, only the last value has effect.
+But for keys representing list properties, each value becomes a
+separate element of the list.
 
-Header lines that don't contain colons are ignored.  So any line that
-doesn't contain a colon or uses an unknown key is effectively a
-comment.  In general keys should not start with hash ('#') so that
-lines starting with a hash are effectively always comments regardless
-of whether they contain a colon.
+Header lines that don't contain colons are ignored.
 
-## Global Configuration
+### Comments ###
 
-By default the global configuration is stored in system/config.cfg,
-but this can be overridden by setting CONFIG_FILE in tiro.cgi.
+Technically there is no comment syntax for header lines but a hash
+('#') at the start of a line is effectively a comment.  If the line
+doesn't contain a colon then the line is ignored regarless of the
+hash.  Since none of the standard keys start with a hash, if the line
+does contain a colon, the line will also be ignored.
+
+
+## Global Configuration ##
+
+By default the global configuration is stored in
+tiro/system/config.cfg, but this can be overridden by setting
+CONFIG_FILE in tiro/tiro.cgi.
+
+The following are the settings that can be set
+in the global configuration.  Usually you will only need to set
+'title', 'admins' and the body text.
+
+'users_file', 'user_id_column', 'user_full_name_column', 'user_expires_column'
+'users_header_lines'.
+
 
 title (required): The title that should be displayed at the top of all pages.
 
-working_dir (defaults to the same directory):
+working_dir (defaults to "."):
   the working directory from which tiro.cgi should
-path (defaults to /usr/local/bin:/usr/bin:/bin): 
- - path: (String) The environment PATH that checkers should run with.
-max_post_size (defaults to 10000):
- - post_max: (Integer) The maximum number of bytes allowed to be uploaded.
+
+path (defaults to "/usr/local/bin:/usr/bin:/bin"): 
+  The PATH that sub-programs (e.g. validators and sanity_tests)
+  should have in their environment when they are running.
+
+max_post_size (defaults to "1000000"):
+  The total number of bytes allowed durring upload.
+
 date_format (defaults to "%a, %b %d %Y, %r"):
+  How to display the date in the user interface.  This is used for display
+  purposes only and has no symantic meaning.  Uses '%' escapes
+  from the UnixDate function in Date::Manip.
+
 log_file (defaults to "system/log/log-%Y-%m-%d.txt"):
+  
 
 assignments_dir (defaults to "assignments"):
-  The path to the directory containing folder configuration files.
+  The path to the directory containing assignment configuration files.
+  This path is relative to the working_dir.
+
 assignments_regex (defaults to "^(\w+)\.cfg$"):
- - folder_configs_ignore: (String) A Perl regular expression.  Files in the
-   folder_configs directory are ignored if they match this regular expression.
+  A Perl regular expression.  Only files in the assignments_dir
+  directory that match this regular expression are treated as
+  assignment configurations.  The part of the filename that matches
+  the first capture buffer is treated as the assignment id.
+
 submissions_dir (defaults to "submissions"):
+  The path to the directory containing submissions.  This path is
+  relative to the working_dir.
 
 admins (list, defaults to the empty list):
- - admins: (List of String) The users that are application administrators.
-     They can see uploads by other users.
+
+  The users that are application administrators.  They can see uploads
+  by other users.  As this is a list, one administrator is written per
+  line.
+
 user_override (defaults to the empty string):
+
+  This is an override for the user login and will be used as the login id
+  instead of the HTTPS user login.  Primarily useful for demo purposes
+  or a public site that shouldn't require login.
+
 users (list, defaults to the empty list):
- - users: (Dictionary) Maps each usernames (as a string) to
+
+  
+  Maps each usernames (as a string) to
    a dictionary that represents the configuration settings for that user.
    That dictionary contains the following keys mapping to the described values.
    - full_name: (String) The full name of the user.
@@ -84,9 +123,6 @@ users_header_lines (defaults to "0"):
 
 text (defaults to the empty string)
 misc
-
-Most configuration will have only the following settings:
- TODO
 
 ## Assignment Configuration ##
 
@@ -111,7 +147,7 @@ due (defaults to the empty string):
 file_count (defaults to the empty string):
 - file_count: (Number) The number of file uploads to allow.
 validators (list, defaults to the empty list):
-- checkers: (Array) A list of checkers to run on submissions for this folder.
+- validators: (Array) A list of checkers to run on submissions for this folder.
     Each element of the array is itself a two element array.
     - The first element is a string indicating the name of the checker.
       The first element only used for display purposes.
@@ -120,13 +156,35 @@ validators (list, defaults to the empty list):
       The first string is the program the other strings are the arguments
       to the program.  The directory containing a particular submission
       is passed as a final argument after the arguments specified in this array.
+- sanity tests: TODO
 
 text_file (defaults to the empty string):
 
-text (defaults to the empty string)
-- text: (String) HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a <div> and is usually a description of the folder or any special instructions the user should now before uploading.
+text (defaults to the empty string):
+HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a <div> and is usually a description of the folder or any special instructions the user should now before uploading.
 misc
 
 ## User Configuration ##
 
-## Validators ##
+Users are defined either in the global configuration file or the user
+configuration file.
+
+Whether defined in the global or the user configuration file, each
+user has certain properties.
+
+id:
+  the user name of the user, this must match the 
+full_name:
+  the 
+
+
+for each user
+each user
+
+Users can be defined either as part of the global configuration or in
+the user configuration file.  
+
+Each user has four properties
+id, full name, expiration date, is admin
+
+A user

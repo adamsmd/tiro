@@ -65,7 +65,7 @@ my %global_config_default = (
   # General Configurations
   # title => 'Assignment Submission Demo',
   path => '/usr/local/bin:/usr/bin:/bin',
-  max_post_size => 10000,
+  max_post_size => 1000000,
   date_format => '%a, %b %d %Y, %r',
   log_file => 'system/log/log-%Y-%m-%d.txt',
 

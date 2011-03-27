@@ -12,7 +12,7 @@ use lib 'system/lib';
 # Modules from Core
 use CGI qw(-private_tempfiles -nosticky);
 use CGI::Carp qw(carpout set_progname);
-use Carp;
+use Carp qw(verbose);
 use Class::Struct;
 use File::Copy qw(copy move); # NOTE: move() has tainting issues
 use File::Path qw(mkpath);
@@ -55,6 +55,7 @@ if ($config->log_file ne "") {
 }
 
 warn "+++ Starting tiro.cgi +++";
+END { warn "--- Stopping tiro.cgi ---"; }
 
 $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
@@ -140,30 +141,6 @@ if (do_download()) { download(); }
 elsif (do_upload()) { upload(); }
 else { main_view(); }
 
-################
-# Actions
-################
-
-sub logged_exit { warn "--- Stopping tiro.cgi ---"; exit 0; }
-sub warn_at_line { my $x = (caller(1))[2]; warn @_, " at line $x.\n"; $x }
-
-sub panic { # Prints error without navigation components
-  my $line = warn_at_line(@_);
-  print $q->header();
-  say $q->start_html(-title=>"Error: " . $config->title);
-  say $q->h1("Error: " . $config->title);
-  say $q->p([@_, "(At line $line and time $now.)"]);
-  logged_exit();
-}
-
-sub error { # Prints error with navigation components
-  my $line = warn_at_line(@_);
-  pre_body();
-  say $q->h1({-style=>"color:red;"}, ["Error: ", @_]);
-  say $q->p("(At line $line and time $now.)");
-  post_body();
-}
-
 sub download {
   @assignments or error("No assignment for download");
   @users or error("No user for download");
@@ -203,8 +180,8 @@ sub upload {
     set_env($assignment, $login, $date);
     warn "Running sanity test: $test";
     push @msg, `$test`;
-    $error ||= $?;
     warn "Exit code: $?";
+    $error ||= $?;
   }
   if ($error) { error("Upload failed:", @msg); }
   move($target_dir, filename($assignment->id, $login_id, $now)) or
@@ -214,6 +191,137 @@ sub upload {
       -uri=>form_url(SHOW_RESULTS(), 1, VALIDATION(), validation(),
                      ASSIGNMENTS, $assignment->id, USERS, $login_id,
                      START_DATE(), $now, END_DATE(), $now));
+}
+
+sub main_view {
+  my @rows;
+  for my $assignment (@assignments) {
+    for my $user (@users) {
+      my @dates = list_dates($assignment->id, $user->id);
+      push @rows, Row->new(assignment=>$assignment, user=>$user,
+                           date=>'', files=>[], late=>0)
+        if submitted() ne SUBMITTED_YES and not @dates;
+      for (@dates) {
+        push @rows, Row->new(
+          assignment=>$assignment, user=>$user, date=>$_->[0],
+          files=>[list_files($assignment, $user, $_->[0].$_->[1])],
+          late=>($_->[0] gt late_after($assignment)), failed=>$_->[1] ne "")
+          if submitted() ne SUBMITTED_NO;
+      }
+    }
+  }
+
+  @rows = sort {(sort_by() eq SORT_USER and $a->user->id cmp $b->user->id)
+                  or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
+                  or (sort_by() eq SORT_FULL_NAME
+                      and $a->user->full_name cmp $b->user->full_name)
+                  or ($a->assignment->id cmp $b->assignment->id)
+                  or ($a->user->id cmp $b->user->id)
+                  or ($a->date cmp $b->date) } @rows;
+
+  pre_body();
+
+  if (show_upload_form()) {
+    for my $a (@assignments) {
+      say $q->start_div({-class=>'assignment'});
+      say $q->h2($a->id . ": ", $a->title);
+      say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
+      say $q->div(scalar(slurp(catfile($config->assignments_dir,
+                                       $a->text_file))))
+        unless $a->text_file eq "";
+      say $q->div($a->text) unless $a->text eq "";
+
+      if ($a->file_count ne "") {
+        say $q->start_form(
+          -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
+        say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
+        say $q->hidden(-name=>ASSIGNMENTS, -value=>$a->id, -override=>1);
+        say $q->hidden(-name=>VALIDATION(), -value=>1, -override=>1);
+        say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
+          for (1..$a->file_count);
+        say $q->p($q->submit(DO_UPLOAD(), "Submit"));
+        say $q->end_form();
+      }
+      say $q->p(); # Add extra space before the final line
+      say $q->end_div();
+    }
+  }
+
+  if (show_results()) {
+    say $q->start_table({-class=>'results'});
+    say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
+                                 "Validation", "Files", "Bytes"])));
+    if (not @rows) {
+      say row(7, $q->center('No results to display.',
+                            'Browse or search to select assignment.'));
+    } else {
+      for my $r (@rows) {
+        say $q->start_tbody();
+        my @url = (ASSIGNMENTS, $r->assignment->id, USERS, $r->user->id,
+                   START_DATE(), $r->date, END_DATE(), $r->date,
+                   SHOW_FAILED(), $r->failed);
+        my @file_rows = @{$r->files} ?
+          map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
+                $_->size] } @{$r->files} : ["(No files)", ""];
+        say multirow([$r->assignment->id, $r->assignment->title,
+                      $r->user->id . ($r->user->is_admin ? " (admin)" : ""),
+                      $r->user->full_name,
+                      ($r->date ?
+                       (href(form_url(@url,VALIDATION(),1,SHOW_RESULTS(),1),
+                             pretty_date($r->date)) .
+                        ($r->late ? " (Late)" : "") .
+                        ($r->failed ? " - FAILED" : "")) :
+                       ("(Nothing submitted)"))], @file_rows);
+
+        if (validation() and $r->date) {
+          if (not @{$r->assignment->validators}) {
+            say '<tr><td></td>';
+            say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
+            say "Submission received on @{[pretty_date($r->date)]}.";
+            say '</td></tr>';
+          } else {
+            set_env($r->assignment, $r->user, $r->date);
+            for my $validator (@{$r->assignment->sanity_tests},
+                               @{$r->assignment->validators}) {
+              say "<tr><td></td><td colspan=7><div>";
+              warn "Running sanity test or validator: $validator";
+              system $validator;
+              warn "Exit code: $?";
+              say "</div></td></tr>";
+            }
+          }
+        }
+        say $q->end_tbody();
+      }
+    }
+    say $q->end_table();
+  }
+
+  say $config->text if not show_upload_form() and not show_results();
+  post_body();
+}
+
+################
+# Rendering Functions
+################
+
+sub warn_at_line { my $x = (caller(1))[2]; warn @_, " at line $x.\n"; $x }
+
+sub panic { # Prints error without navigation components
+  my $line = warn_at_line(@_);
+  print $q->header();
+  say $q->start_html(-title=>"Error: " . $config->title);
+  say $q->h1("Error: " . $config->title);
+  say $q->p([@_, "(At line $line and time $now.)"]);
+  exit 0;
+}
+
+sub error { # Prints error with navigation components
+  my $line = warn_at_line(@_);
+  pre_body();
+  say $q->h1({-style=>"color:red;"}, ["Error: ", @_]);
+  say $q->p("(At line $line and time $now.)");
+  post_body();
 }
 
 sub pre_body {
@@ -332,116 +440,12 @@ sub post_body {
             $q->a({-href=>'http://www.cs.indiana.edu/~adamsmd/projects/tiro/'},
                   "Tiro") . ".");
   say $q->end_html();
-  logged_exit();
+  exit 0;
 }
 
-sub main_view {
-  my @rows;
-  for my $assignment (@assignments) {
-    for my $user (@users) {
-      my @dates = list_dates($assignment->id, $user->id);
-      push @rows, Row->new(assignment=>$assignment, user=>$user,
-                           date=>'', files=>[], late=>0)
-        if submitted() ne SUBMITTED_YES and not @dates;
-      for (@dates) {
-        push @rows, Row->new(
-          assignment=>$assignment, user=>$user, date=>$_->[0],
-          files=>[list_files($assignment, $user, $_->[0].$_->[1])],
-          late=>($_->[0] gt late_after($assignment)), failed=>$_->[1] ne "")
-          if submitted() ne SUBMITTED_NO;
-      }
-    }
-  }
-
-  @rows = sort {(sort_by() eq SORT_USER and $a->user->id cmp $b->user->id)
-                  or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
-                  or (sort_by() eq SORT_FULL_NAME
-                      and $a->user->full_name cmp $b->user->full_name)
-                  or ($a->assignment->id cmp $b->assignment->id)
-                  or ($a->user->id cmp $b->user->id)
-                  or ($a->date cmp $b->date) } @rows;
-
-  pre_body();
-
-  if (show_upload_form()) {
-    for my $a (@assignments) {
-      say $q->start_div({-class=>'assignment'});
-      say $q->h2($a->id . ": ", $a->title);
-      say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
-      say $q->div(scalar(slurp(catfile($config->assignments_dir,
-                                       $a->text_file))))
-        unless $a->text_file eq "";
-      say $q->div($a->text) unless $a->text eq "";
-
-      if ($a->file_count ne "") {
-        say $q->start_form(
-          -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
-        say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
-        say $q->hidden(-name=>ASSIGNMENTS, -value=>$a->id, -override=>1);
-        say $q->hidden(-name=>VALIDATION(), -value=>1, -override=>1);
-        say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
-          for (1..$a->file_count);
-        say $q->p($q->submit(DO_UPLOAD(), "Submit"));
-        say $q->end_form();
-      }
-      say $q->p(); # Add extra space before the final line
-      say $q->end_div();
-    }
-  }
-
-  if (show_results()) {
-    say $q->start_table({-class=>'results'});
-    say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
-                                 "Validation", "Files", "Bytes"])));
-    if (not @rows) {
-      say row(7, $q->center('No results to display.',
-                            'Browse or search to select assignment.'));
-    } else {
-      for my $r (@rows) {
-        say $q->start_tbody();
-        my @url = (ASSIGNMENTS, $r->assignment->id, USERS, $r->user->id,
-                   START_DATE(), $r->date, END_DATE(), $r->date,
-                   SHOW_FAILED(), $r->failed);
-        my @file_rows = @{$r->files} ?
-          map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
-                $_->size] } @{$r->files} : ["(No files)", ""];
-        say multirow([$r->assignment->id, $r->assignment->title,
-                      $r->user->id . ($r->user->is_admin ? " (admin)" : ""),
-                      $r->user->full_name,
-                      ($r->date ?
-                       (href(form_url(@url,VALIDATION(),1,SHOW_RESULTS(),1),
-                             pretty_date($r->date)) .
-                        ($r->late ? " (Late)" : "") .
-                        ($r->failed ? " - FAILED" : "")) :
-                       ("(Nothing submitted)"))], @file_rows);
-
-        if (validation() and $r->date) {
-          if (not @{$r->assignment->validators}) {
-            say '<tr><td></td>';
-            say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
-            say "Submission received on @{[pretty_date($r->date)]}.";
-            say '</td></tr>';
-          } else {
-            set_env($r->assignment, $r->user, $r->date);
-            for my $validator (@{$r->assignment->sanity_tests},
-                               @{$r->assignment->validators}) {
-              say "<tr><td></td><td colspan=7><div>";
-              warn "Running sanity test or validator: $validator";
-              system $validator;
-              warn "Exit code: $?";
-              say "</div></td></tr>";
-            }
-          }
-        }
-        say $q->end_tbody();
-      }
-    }
-    say $q->end_table();
-  }
-
-  say $config->text if not show_upload_form() and not show_results();
-  post_body();
-}
+################
+# Misc Functions
+################
 
 sub set_env {
   my ($assignment, $user, $date) = @_;
@@ -461,10 +465,6 @@ sub set_env {
   $ENV{'TIRO_ASSIGNMENT_DUE'} = $assignment->due;
   $ENV{'TIRO_ASSIGNMENT_FILE_COUNT'} = $assignment->file_count;
 }
-
-################
-# Listings
-################
 
 sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 

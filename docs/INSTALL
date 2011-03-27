@@ -2,17 +2,16 @@
   Perl 5.8 or later
   A web server with CGI and HTTP authentication
     (Apache with SSL is prefered.)
-  Date::Manip (5.44 tested, http://search.cpan.org/~sbeck/Date-Manip/
-TODO link and version)
-  File::Slurp (9999.13 tested, 9999.08 in principle
-http://search.cpan.org/~uri/File-Slurp/
-TODO link and version)
-  List::MoreUtils (0.25_01 tested
-http://search.cpan.org/~adamk/List-MoreUtils/
-TODO link and version)
+  Date::Manip - http://search.cpan.org/~sbeck/Date-Manip/
+    (tested with version 5.44)
+  File::Slurp - http://search.cpan.org/~uri/File-Slurp/
+    (tested with version 9999.13)
+  List::MoreUtils - http://search.cpan.org/~adamk/List-MoreUtils/
+    (tested with version 0.25_01)
 
 
 ## Quick Installation
+Edit install.sh
 ./system/bin/install DST URL PERM
 
 ## Manual Installation
