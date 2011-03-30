@@ -53,13 +53,11 @@ CONFIG_FILE in tiro/tiro.cgi.
 
 The following are the settings that can be set
 in the global configuration.  Usually you will only need to set
-'title', 'admins' and the body text.
+'title', 'admins', 'users_file', and the body text.
 
-'users_file', 'user_id_column', 'user_full_name_column', 'user_expires_column'
-'users_header_lines'.
+title (defaults to the empty string):
 
-
-title (required): The title that should be displayed at the top of all pages.
+  The title that should be displayed at the top of all pages.
 
 working_dir (defaults to "."):
   the working directory from which tiro.cgi should
@@ -107,7 +105,6 @@ user_override (defaults to the empty string):
 
 users (list, defaults to the empty list):
 
-  
   Maps each usernames (as a string) to
    a dictionary that represents the configuration settings for that user.
    That dictionary contains the following keys mapping to the described values.
@@ -115,39 +112,55 @@ users (list, defaults to the empty list):
      Only used for display purposes.
    - expires: (String) The date afterwhich this user should no longer be
      allowed access.  Any date format parsable by Date::Manip is allowed.
+
 users_file (defaults to the empty string):
-user_name_column (defaults to the empty string):
-user_full_name_column (defaults to the empty string):
-user_expires_column (defaults to the empty string):
-users_header_lines (defaults to "0"):
+  header_lines -- id -- name -- expires -- filename
 
 text (defaults to the empty string)
 misc
 
 ## Assignment Configuration ##
 
-The identifier for the folder configuration is taken from the file name
-of the folder configuration file.
-
-By default assignments are stored in the assignments/ folder, but this
-can be overridden by setting assignments_dir in the global
-configuration file.
-
-  assignments_dir => 'assignments',
-  assignments_regex => qr[^(\w+)\.cfg$],
+Assignment configurations are stored in the folder specified by the
+'assignments_dir' (default 'tiro/assignments').  Each file in the
+'assignments_dir' that matches the 'assignments_regex' (default
+'^(\w+)\.cfg$') is used as the assignment configuration for one
+assignment.  The assignment 'id' is the part of the filename that
+matches the first capture buffer of the 'assignments_regex'.
+The remaining properties of an assignment are set ...
 
 
 
-title (required): The assignment title
-- title: (String) The friendly name for the folder.  Only used for display purposes.
+title (defaults to the empty string):
+
+  The assignment title.  Should be more friendly and readable than the
+  assignment id.  Only used for display purposes.
+
+due (defaults to the empty string):
+
+  The date that the folder is due.
+  Any date format parsable by Date::Manip is allowed.
+  Submissions after this date are considered late.
+  If it is the empty string, then no due date is displayed
+  and no submissions are considered late.
 
 hidden_until (defaults to the empty string):
-due (defaults to the empty string):
-- due: (String) The date that the folder is due.  Any date format parsabel by Date::Manip is allowed.
+
+  The date before which the assignment is hidden from non-admin users.
+  Any date format parsable by Date::Manip is allowed.  If it is the
+  empty string, then the assignment is never hidden.
+
 file_count (defaults to the empty string):
-- file_count: (Number) The number of file uploads to allow.
+
+  The number of file upload fields to use when showing the file upload
+  form.  Note that both zero and the empty string are valid values but
+  they are different.  Zero causes there to be no file upload field
+  but there to still be a submission button.  An empty string causes
+  there to be neither upload fields not a submission button.
+
 validators (list, defaults to the empty list):
-- validators: (Array) A list of checkers to run on submissions for this folder.
+
+  A list of checkers to run on submissions for this folder.
     Each element of the array is itself a two element array.
     - The first element is a string indicating the name of the checker.
       The first element only used for display purposes.
@@ -156,7 +169,8 @@ validators (list, defaults to the empty list):
       The first string is the program the other strings are the arguments
       to the program.  The directory containing a particular submission
       is passed as a final argument after the arguments specified in this array.
-- sanity tests: TODO
+
+sanity tests: TODO
 
 text_file (defaults to the empty string):
 
@@ -170,7 +184,7 @@ Users are defined either in the global configuration file or the user
 configuration file.
 
 Whether defined in the global or the user configuration file, each
-user has certain properties.
+user has four properties.
 
 id:
   the user name of the user, this must match the 
@@ -178,11 +192,7 @@ full_name:
   the 
 
 
-for each user
-each user
 
-Users can be defined either as part of the global configuration or in
-the user configuration file.  
 
 Each user has four properties
 id, full name, expiration date, is admin

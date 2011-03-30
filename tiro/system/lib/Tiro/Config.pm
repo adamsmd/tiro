@@ -63,7 +63,7 @@ my %global_config_default = (
   working_dir=>'.',
 
   # General Configurations
-  # title => 'Assignment Submission Demo',
+  title => '',
   path => '/usr/local/bin:/usr/bin:/bin',
   max_post_size => 1000000,
   date_format => '%a, %b %d %Y, %r',
@@ -75,25 +75,20 @@ my %global_config_default = (
   submissions_dir => 'submissions',
 
   # User Configurations
-  #admins => ['user1'],
-  #user_override => 'user1',
-  #users => { user1 => { full_name => 'Demo User #1', expires=>'tomorrow'} },
-  #users_file=>"users.csv",
-  #user_id_column=>0, user_full_name_column=>1, user_expires_column=>2,
-  users_header_lines=>0,
+  admins => [],
+  user_override => '',
+  users => {},
+  users_file=>'',
   );
 
 defined $global_config_default{$_} or $global_config_default{$_} = ""
   for ('config_file', 'log_file', 'users_file', 'user_expires_column');
 
 struct GlobalConfig=>{
-  working_dir=>'$', title=>'$', path=>'$', timezone=>'$',
-  max_post_size=>'$', date_format=>'$', log_file=>'$', assignments_dir=>'$',
+  working_dir=>'$', title=>'$', path=>'$', max_post_size=>'$',
+  date_format=>'$', log_file=>'$', assignments_dir=>'$',
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
-  user_override=>'$', users=>'*%', users_file=>'$',
-  user_id_column=>'$', user_full_name_column=>'$', user_expires_column=>'$',
-  users_header_lines=>'$',
-  text=>'$', misc=>'%' };
+  user_override=>'$', users=>'*%', users_file=>'$', text=>'$', misc=>'%' };
 struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
 struct AssignmentConfig=>{
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
@@ -114,9 +109,9 @@ sub parse_global_config_file {
 
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
-                 map {
-                   /\s*(.*?)\s*--\s*(.*?)\s*--\s*(.*)\s*/;
-                   ($1, { full_name => $2, expires => $3 }) } @{$c{'users'}});
+                 map { my ($id, $name, $exp) = split(/\s*--\s*/, $_, 3);
+                       ($id, { full_name => $name, expires => $exp }) }
+                 @{$c{'users'}});
 
     %config = (%config, %c, admins => \@admins, users => \%users);
   }
@@ -153,13 +148,14 @@ sub parse_user_configs {
   my %users = %{$global_config->users};
 
   if ($global_config->users_file ne "") {
-    for (drop($global_config->users_header_lines || 0,
-              split("\n", slurp $global_config->users_file))) {
+    my ($header_lines, $id_col, $full_name_col, $expires_col, $file_name) =
+      split(/\s*--\s*/, $global_config->users_file, 5);
+
+    for (drop($header_lines || 0, split("\n", slurp $file_name))) {
       my @words = quotewords(",", 0, $_);
-      my $id = $words[$global_config->user_id_column];
-      my $full_name = $words[$global_config->user_full_name_column];
-      my $expires = $global_config->user_expires_column eq "" ?
-        'tomorrow' : $words[$global_config->user_expires_column];
+      my $id = $words[$id_col];
+      my $full_name = $words[$full_name_col];
+      my $expires = $expires_col eq "" ? 'tomorrow' : $words[$expires_col];
       if (defined $id and defined $full_name and defined $expires) {
         $users{$id} = { full_name => $full_name, expires => $expires };
       }

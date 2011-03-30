@@ -74,7 +74,7 @@ my @real_all_users = sort {$a->id cmp $b->id} parse_user_configs($config);
 
 # Input formats
 sub date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
-sub file { (($_[0] or "") =~ m[^(?:.*/)?([A-Za-z0-9_\. -]+)$])[0]; }
+sub file { (($_[0] or "") =~ m[^(?:.*[\\/])?([A-Za-z0-9_\. -]+)$])[0]; }
 sub keyword { (($_[0] or "") =~ m[^([A-Za-z0-9_\.-]*)$])[0]; }
 sub bool { $_[0] ? 1 : 0; }
 
