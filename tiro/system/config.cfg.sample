@@ -1,0 +1,21 @@
+title: Tiro Demo
+admins: user1
+user_override: user1
+users: user1 -- Demo User #1 -- tomorrow
+users_file: 0 -- 0 -- 1 -- 2 -- system/users.csv.sample
+# 
+#date_format: %a, %b %d %Y, %r
+#max_post_size: 1000000
+#
+#working_dir: .
+#path: /usr/local/bin:/usr/bin:/bin
+#assignments_dir: assignments
+#assignments_regex: ^(\w+)\.cfg$
+#submissions_dir: submissions
+#log_file: system/log/log-%Y-%m-%d.txt
+
+<h2>Welcome</h2>
+
+Welcome to the Tiro Demo.  This is the welcome text which
+may contain arbitrary <b>HTML</b> and is put inside a &lt;div&gt;.  It
+may also be left blank for a more minimalist look.

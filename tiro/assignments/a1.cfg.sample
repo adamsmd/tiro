@@ -1,0 +1,12 @@
+title: Assignment Title
+due: 2032-02-14T00:00:00
+late_after: 2032-02-14T00:15:00
+hidden_until: 2031-12-31T23:59:59
+file_count: 3
+reports: TODO
+guards: TODO
+#text_file: descriptions/a1.html
+tests: Always Pass -- perl -e 'print "Running test on: ", $ARGV[0]' $TIRO_SUBMISSION_DIR
+
+This is the assignment text which may contain arbitrary <b>HTML</b>
+and is put inside a &lt;div&gt;.
