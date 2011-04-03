@@ -85,7 +85,7 @@ define_param(
   show_search_form => \&bool, show_upload_form => \&bool,
   show_results => \&bool, show_failed => \&bool,
   start_date => \&date, end_date => \&date, only_latest => \&bool,
-  report => \&bool, submitted => \&keyword, sort_by => \&keyword,
+  reports => \&bool, guards => \&bool, submitted => \&keyword, sort_by => \&keyword,
   user_override => \&keyword);
 use constant {
   SUBMITTED_YES=>"sub_yes", SUBMITTED_NO=>"sub_no", SUBMITTED_ANY=>"sub_any",
@@ -157,7 +157,6 @@ sub download {
 }
 
 sub upload {
-  @uploads or error("No files selected for upload.");
   my $assignment = $assignments[0] or error("No assignment for upload.");
 
   my $date = "$now.tmp";
@@ -188,7 +187,7 @@ sub upload {
     error("Can't move TODO: $!");
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
-      -uri=>form_url(SHOW_RESULTS(), 1, REPORT(), report(),
+      -uri=>form_url(SHOW_RESULTS(), 1, REPORTS(), reports(),
                      ASSIGNMENTS, $assignment->id, USERS, $login_id,
                      START_DATE(), $now, END_DATE(), $now));
 }
@@ -236,7 +235,7 @@ sub main_view {
           -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
         say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
         say $q->hidden(-name=>ASSIGNMENTS, -value=>$a->id, -override=>1);
-        say $q->hidden(-name=>REPORT(), -value=>1, -override=>1);
+        say $q->hidden(-name=>REPORTS(), -value=>1, -override=>1);
         say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
           for (1..$a->file_count);
         say $q->p($q->submit(DO_UPLOAD(), "Submit"));
@@ -250,7 +249,7 @@ sub main_view {
   if (show_results()) {
     say $q->start_table({-class=>'results'});
     say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
-                                 "Report", "Files", "Bytes"])));
+                                 "Reports", "Files", "Bytes"])));
     if (not @rows) {
       say row(7, $q->center('No results to display.',
                             'Browse or search to select assignment.'));
@@ -267,28 +266,26 @@ sub main_view {
                       $r->user->id . ($r->user->is_admin ? " (admin)" : ""),
                       $r->user->full_name,
                       ($r->date ?
-                       (href(form_url(@url, REPORT(), 1, SHOW_RESULTS(), 1),
+                       (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
                              pretty_date($r->date)) .
                         ($r->late ? " (Late)" : "") .
                         ($r->failed ? " - FAILED" : "")) :
                        ("(Nothing submitted)"))], @file_rows);
 
-        if (report() and $r->date) {
-          if (not @{$r->assignment->reports}) {
-            say '<tr><td></td>';
-            say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
-            say "Submission received on @{[pretty_date($r->date)]}.";
-            say '</td></tr>';
-          } else {
-            set_env($r->assignment, $r->user, $r->date);
-            for my $report (@{$r->assignment->guards},
-                            @{$r->assignment->reports}) {
-              say "<tr><td></td><td colspan=7><div>";
-              warn "Running guard or report: $report";
-              system $report;
-              warn "Exit code: $?";
-              say "</div></td></tr>";
-            }
+        if ($r->date and (reports() or guards())) {
+          my @programs = ((guards() ? @{$r->assignment->guards} : ()),
+                          (reports() ? @{$r->assignment->reports} : ()));
+          say '<tr><td></td>';
+          say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
+          say "Submission received on @{[pretty_date($r->date)]}.";
+          say '</td></tr>';
+          set_env($r->assignment, $r->user, $r->date);
+          for my $program (@programs) {
+            say "<tr><td></td><td colspan=7><div>";
+            warn "Running guard or report: $program";
+            system $program;
+            warn "Exit code: $?";
+            say "</div></td></tr>";
           }
         }
         say $q->end_tbody();
@@ -407,7 +404,8 @@ EOT
       ["Show:", join($q->br(), map {$q->checkbox($_->[0],$_->[1],'y',$_->[2])}
                      ([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
                       [SHOW_UPLOAD_FORM(), show_upload_form(), 'Upload Form'],
-                      [REPORT(), report(), 'Report'],
+                      [REPORTS(), reports(), 'Reports'],
+                      [GUARDS(), guards(), 'Guards'],
                       [SHOW_FAILED(), show_failed(), 'Failed Uploads']))],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
