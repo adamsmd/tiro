@@ -1,3 +1,5 @@
+Title: Tiro Configuration
+
 ## Configuration ##
 
 There are three sorts of configuration for Tiro:
@@ -18,6 +20,7 @@ specified by the 'users_file' setting in the global configuration.
 Additional users can also be specified directly in the global
 configuration.
 
+
 ## Configuration File Format ##
 
 Both the global configuration file and the assignment configuration
@@ -35,6 +38,7 @@ But for keys representing list properties, each value becomes a
 separate element of the list.
 
 Header lines that don't contain colons are ignored.
+
 
 ### Comments ###
 
@@ -119,6 +123,7 @@ users_file (defaults to the empty string):
 text (defaults to the empty string)
 misc
 
+
 ## Assignment Configuration ##
 
 Assignment configurations are stored in the folder specified by the
@@ -158,6 +163,9 @@ file_count (defaults to the empty string):
   but there to still be a submission button.  An empty string causes
   there to be neither upload fields not a submission button.
 
+reports (list, defaults to the empty list):
+guards (list, defaults to the empty list):
+
 validators (list, defaults to the empty list):
 
   A list of checkers to run on submissions for this folder.
@@ -170,13 +178,12 @@ validators (list, defaults to the empty list):
       to the program.  The directory containing a particular submission
       is passed as a final argument after the arguments specified in this array.
 
-sanity tests: TODO
-
 text_file (defaults to the empty string):
 
 text (defaults to the empty string):
-HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a <div> and is usually a description of the folder or any special instructions the user should now before uploading.
+HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a div tag and is usually a description of the folder or any special instructions the user should now before uploading.
 misc
+
 
 ## User Configuration ##
 
@@ -190,6 +197,7 @@ id:
   the user name of the user, this must match the 
 full_name:
   the 
+expiration date:
 
 
 
@@ -198,3 +206,38 @@ Each user has four properties
 id, full name, expiration date, is admin
 
 A user
+
+
+##  ##
+
+TIRO_CONFIG_FILE'} = CONFIG_FILE; # DANGER: wrong path
+TIRO_LOGIN_ID'} = $login_id;
+
+TIRO_LOGIN_IS_ADMIN:
+ Whether the user for the submission is an administrator.
+ - 0 if the user is not an admin
+ - 1 if the user is an admin
+
+TIRO_SUBMISSION_DIR:
+  The relative path to the directory containing the submission.
+
+TIRO_SUBMISSION_USER:
+  The id of the user for the submission.
+TIRO_SUBMISSION_DATE:
+  The date of the submission in canonical form.
+
+TIRO_ASSIGNMENT_FILE:
+  The path to the configuration file for the assignment of the submission.
+
+TIRO_ASSIGNMENT:
+  The id of the assignment of the submission.
+
+TIRO_ASSIGNMENT_TITLE:
+  The title of the assignment of the submission.
+
+TIRO_ASSIGNMENT_LATE_AFTER:
+  The late_after of the assignment of the submission.
+TIRO_ASSIGNMENT_DUE:
+  The due date of the assignment of the submission.
+TIRO_ASSIGNMENT_FILE_COUNT:
+  The file_count of the assignment of the submission.

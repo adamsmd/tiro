@@ -60,6 +60,9 @@ END { warn "--- Stopping tiro.cgi ---"; }
 $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
 my $q = CGI->new;
+panic("Connection limit (@{[$config->max_post_size]} bytes) exceeded.",
+      "Uploaded file too large?")
+  if ($q->cgi_error() || "") =~ /^413/; # 413 POST too large
 panic($q->cgi_error()) if $q->cgi_error();
 
 exists $ENV{$_} and warn("$_: ", $ENV{$_}) for
@@ -101,8 +104,6 @@ panic('Malformed login id "' . $tainted_user . '".', "Missing HTTPS?")
   unless $login_id;
 panic("No such user: $login_id")
   unless defined $login;
-panic("Access for $login_id expired on ", $login->expires)
-  unless $now lt $login->expires;
 
 if ($login->is_admin && user_override() ne "") {
   $login_id = user_override();
@@ -309,7 +310,7 @@ sub panic { # Prints error without navigation components
   print $q->header();
   say $q->start_html(-title=>"Error: " . $config->title);
   say $q->h1("Error: " . $config->title);
-  say $q->p([@_, "(At line $line and time $now.)"]);
+  say $q->p([@_, "(At line $line and time " . date("now") . ".)"]);
   exit 0;
 }
 

@@ -82,14 +82,14 @@ my %global_config_default = (
   );
 
 defined $global_config_default{$_} or $global_config_default{$_} = ""
-  for ('config_file', 'log_file', 'users_file', 'user_expires_column');
+  for ('config_file', 'log_file', 'users_file');
 
 struct GlobalConfig=>{
   working_dir=>'$', title=>'$', path=>'$', max_post_size=>'$',
   date_format=>'$', log_file=>'$', assignments_dir=>'$',
   assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
   user_override=>'$', users=>'*%', users_file=>'$', text=>'$', misc=>'%' };
-struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$', expires=>'$'};
+struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$'};
 struct AssignmentConfig=>{
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
@@ -110,7 +110,7 @@ sub parse_global_config_file {
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
                  map { my ($id, $name, $exp) = split(/\s*--\s*/, $_, 3);
-                       ($id, { full_name => $name, expires => $exp }) }
+                       ($id, { full_name => $name }) }
                  @{$c{'users'}});
 
     %config = (%config, %c, admins => \@admins, users => \%users);
@@ -148,23 +148,21 @@ sub parse_user_configs {
   my %users = %{$global_config->users};
 
   if ($global_config->users_file ne "") {
-    my ($header_lines, $id_col, $full_name_col, $expires_col, $file_name) =
-      split(/\s*--\s*/, $global_config->users_file, 5);
+    my ($header_lines, $id_col, $full_name_col, $file_name) =
+      split(/\s*--\s*/, $global_config->users_file, 4);
 
     for (drop($header_lines || 0, split("\n", slurp $file_name))) {
       my @words = quotewords(",", 0, $_);
       my $id = $words[$id_col];
       my $full_name = $words[$full_name_col];
-      my $expires = $expires_col eq "" ? 'tomorrow' : $words[$expires_col];
-      if (defined $id and defined $full_name and defined $expires) {
-        $users{$id} = { full_name => $full_name, expires => $expires };
+      if (defined $id and defined $full_name) {
+        $users{$id} = { full_name => $full_name };
       }
     }
   }
 
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
-  $users{$_}->{'expires'} = date($users{$_}->{'expires'}) for keys %users;
 
   return map { UserConfig->new(id => $_, %{$users{$_}}); } (keys %users);
 }
