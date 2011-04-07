@@ -1,25 +1,31 @@
-## Requirements:
-  Perl 5.8 or later
-  A web server with CGI and HTTP authentication
+Title: Tiro Installation
+
+
+## Requirements ##
+
+- Perl 5.8 or later.
+- A web server with CGI and HTTP authentication
     (Apache with SSL is prefered.)
-  Date::Manip - http://search.cpan.org/~sbeck/Date-Manip/
-    (tested with version 5.44)
-  File::Slurp - http://search.cpan.org/~uri/File-Slurp/
-    (tested with version 9999.13)
-  List::MoreUtils - http://search.cpan.org/~adamk/List-MoreUtils/
-    (tested with version 0.25_01)
+- Perl modules that must be installed:
+  - Date::Manip (tested with version 5.44)
+    - http://search.cpan.org/~sbeck/Date-Manip/
+  - File::Slurp (tested with version 9999.13)
+    - http://search.cpan.org/~uri/File-Slurp/
+  - List::MoreUtils (tested with version 0.25_01)
+    - http://search.cpan.org/~adamk/List-MoreUtils/
 
-
-## Quick Installation
-Edit install.sh
-./system/bin/install DST URL PERM
+## Quick Installation ##
+- Edit install.sh
+- Run install.sh
+- Configure your installation.  See the CONFIG document.
 
 ## Manual Installation
 - Create a directory under your cgi-pub for tiro.  Say, cgi-pub/tiro/.
-- Copy the tiro.cgi file as wells as the
-  assignments, submissions and system directories.
+- Copy the tiro.cgi file as well as the
+  assignments, submissions and system directories into cgi-pub/tiro/.
 
 - VERY IMPORTANT: Configure your folder permissions.
+
   On Apache this is done via .htaccess.
   TODO.
   Set permissions.
@@ -28,10 +34,10 @@ Edit install.sh
   - On most Apache installations this is as simple as editing
     cgi-pub/.htaccess to contain the following lines and making sure
     the .htaccess has group and world read permissions:
-      <Files tiro.cgi>
+      &lt;Files tiro.cgi&gt;
       AuthType KerberosV5
       AuthName "UITS Network ID"
       Require valid-user
-      </Files>
+      &gt;/Files&lt;
 
-- Configure your installation.  See the Configuration section of this document.
+- Configure your installation.  See the CONFIG document.

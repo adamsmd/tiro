@@ -59,9 +59,6 @@ sub date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 
 # Configuration
 my %global_config_default = (
-  # Bootstrap Configurations
-  working_dir=>'.',
-
   # General Configurations
   title => '',
   path => '/usr/local/bin:/usr/bin:/bin',
@@ -85,10 +82,10 @@ defined $global_config_default{$_} or $global_config_default{$_} = ""
   for ('config_file', 'log_file', 'users_file');
 
 struct GlobalConfig=>{
-  working_dir=>'$', title=>'$', path=>'$', max_post_size=>'$',
-  date_format=>'$', log_file=>'$', assignments_dir=>'$',
-  assignments_regex=>'$', submissions_dir=>'$', admins=>'*@',
-  user_override=>'$', users=>'*%', users_file=>'$', text=>'$', misc=>'%' };
+  title=>'$', admins=>'*@', user_override=>'$', users=>'*%', user_files=>'@', 
+  path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
+  assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$',
+  text=>'$', misc=>'%' };
 struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$'};
 struct AssignmentConfig=>{
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
@@ -105,7 +102,8 @@ sub parse_global_config_file {
   my %config = %global_config_default;
 
   if (defined $file) {
-    my %c = parse_config_file($file, 'text', 'admins', 'users', @lists);
+    my %c = parse_config_file(
+      $file, 'text', 'admins', 'users', 'user_files', @lists);
 
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
@@ -147,9 +145,9 @@ sub parse_user_configs {
 
   my %users = %{$global_config->users};
 
-  if ($global_config->users_file ne "") {
+  for my $file (@{$global_config->user_files}) {
     my ($header_lines, $id_col, $full_name_col, $file_name) =
-      split(/\s*--\s*/, $global_config->users_file, 4);
+      split(/\s*--\s*/, $file, 4);
 
     for (drop($header_lines || 0, split("\n", slurp $file_name))) {
       my @words = quotewords(",", 0, $_);

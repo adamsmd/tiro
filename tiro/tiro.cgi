@@ -45,9 +45,6 @@ set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})");
 
 my $config = parse_global_config_file(CONFIG_FILE);
 
-chdir $config->working_dir or
-  die "Can't chdir to working_dir ", $config->working_dir, ": $!";
-
 if ($config->log_file ne "") {
   open(my $LOG_FILE, ">>" . UnixDate("now", $config->log_file)) or
     die "Can't open log file ", $config->log_file, ": $!\n";
@@ -451,6 +448,8 @@ sub set_env {
   $ENV{'TIRO_CONFIG_FILE'} = CONFIG_FILE;
   $ENV{'TIRO_LOGIN_ID'} = $login_id;
   $ENV{'TIRO_LOGIN_IS_ADMIN'} = $login->is_admin;
+  $ENV{'TIRO_REAL_LOGIN_ID'} = $real_login_id;
+  $ENV{'TIRO_REAL_LOGIN_IS_ADMIN'} = $real_login->is_admin;
 
   $ENV{'TIRO_SUBMISSION_DIR'} = filename($assignment->id, $user->id, $date);
   $ENV{'TIRO_SUBMISSION_USER'} = $user->id;
@@ -458,7 +457,7 @@ sub set_env {
   $ENV{'TIRO_ASSIGNMENT_FILE'} = catfile(
     $config->assignments_dir, $assignment->path);
 
-  $ENV{'TIRO_ASSIGNMENT'} = $assignment->id;
+  $ENV{'TIRO_ASSIGNMENT_ID'} = $assignment->id;
   $ENV{'TIRO_ASSIGNMENT_TITLE'} = $assignment->title;
   $ENV{'TIRO_ASSIGNMENT_LATE_AFTER'} = $assignment->late_after;
   $ENV{'TIRO_ASSIGNMENT_DUE'} = $assignment->due;

@@ -1,243 +1,336 @@
 Title: Tiro Configuration
 
-## Configuration ##
 
 There are three sorts of configuration for Tiro:
+
  - global configuration,
  - assignment configuration, and
  - user configuration.
 
-Global configurations are stored in tiro/system/config.cfg.  (This is
-determined by the CONFIG_FILE constant in tiro.cgi and can be changed
-if you wish.)
+By default global configurations are stored in
+"tiro/system/config.cfg".  It uses the [Configuration File Format][]
+specified in this document.  See [Global Configuration][] in this
+document for more details.  A sample global configuration is provided
+in "tiro/system/config.cfg.sample".
 
-Assignment configurations are files stored in the tiro/assignments/
-directory.  Each file in the tiro/assignments/ folder represents a
-single assignment and contains the configuration for that assignment.
+By default assignment configurations are files stored in the
+"tiro/assignments/" directory.  Each file in the "tiro/assignments/"
+folder represents a single assignment and contains the configuration
+for that assignment.  These files use the [Configuration File
+Format][] specified in this document.  See [Assignment Configuration]
+in this document for more details.  A sample assignment configuration
+is provided in "tiro/assignments/a1.cfg.sample".
 
-User configurations are stored in the CSV (comma-separated value) file
-specified by the 'users_file' setting in the global configuration.
-Additional users can also be specified directly in the global
-configuration.
+User configurations are stored directly in the global configuration
+file and/or in one or more a separate CSV (comma-separated value)
+files.  See [User Configuration][] in this document for more details.
+A sample user configuration file is provided in
+"tiro/system/users.csv.sample".
+
+All configuration locations can be changed.
 
 
 ## Configuration File Format ##
 
 Both the global configuration file and the assignment configuration
-files use the same format.  A configuration file start with a header
+files use the same format.  A configuration file starts with a header
 made up of multiple header lines.  The header ends at the first blank
-line.  (Any line with only white space counts as a blank line.)
-Everything after the header counts as the body.  The body is
-unstructured HTML.
+line containing only white space.  Everything after the header counts
+as the body.  The body is unstructured text and is usually HTML.
 
 Header lines consist of a key and a value separated by the first colon
-(':') on the line.  White space at the start and end of the key and
-value is ignored.  The same key may be duplicated multiple times.  For
-keys representing scalar properties, only the last value has effect.
-But for keys representing list properties, each value becomes a
-separate element of the list.
+(":") on the line.  Header lines that don't contain a colon are
+ignored.  White space at the start and end of the key and value is
+ignored.
 
-Header lines that don't contain colons are ignored.
+When there are duplicate keys from different lines, they become
+separate elements of a list for keys representing a list property.
+Only the last value has effect when the key represents a non-list
+property.
 
-
-### Comments ###
-
-Technically there is no comment syntax for header lines but a hash
-('#') at the start of a line is effectively a comment.  If the line
-doesn't contain a colon then the line is ignored regarless of the
-hash.  Since none of the standard keys start with a hash, if the line
-does contain a colon, the line will also be ignored.
+Technically there is no comment syntax for configuration files.
+However, the comment syntax of the body text (e.g. HTML comments)
+still applies, and a hash ("#") at the start of a header line is
+effectively a comment.  Since none of the standard keys start with a
+hash, if the line does contain a colon, the line will be ignored.  If
+the header line doesn't contain a colon then the line is ignored
+regardless of the hash.
 
 
 ## Global Configuration ##
 
-By default the global configuration is stored in
-tiro/system/config.cfg, but this can be overridden by setting
-CONFIG_FILE in tiro/tiro.cgi.
+The global configuration uses the [Configuration File Format][]
+specified in this document and is stored in "tiro/system/config.cfg"
+by default.  The location of the global configuration file is
+determined by the "CONFIG_FILE" constant in "tiro/tiro.cgi" and can be
+changed if you wish but this is usually not necessary.
 
-The following are the settings that can be set
-in the global configuration.  Usually you will only need to set
-'title', 'admins', 'users_file', and the body text.
+The body of the global configuration file is the welcome text that is
+displayed on Tiro's starting page.  It contains arbitrary HTML and is
+put inside a "div" tag in starting page.  It may be left blank for a
+more minimalist look.
+
+The following section lists all the settings that can be set in the
+global configuration.  Usually you will only need to set "title",
+"admins", "user_files", and the body text.
+
+
+### Global Options ###
 
 title (defaults to the empty string):
-
-  The title that should be displayed at the top of all pages.
-
-working_dir (defaults to "."):
-  the working directory from which tiro.cgi should
-
-path (defaults to "/usr/local/bin:/usr/bin:/bin"): 
-  The PATH that sub-programs (e.g. validators and sanity_tests)
-  should have in their environment when they are running.
-
-max_post_size (defaults to "1000000"):
-  The total number of bytes allowed durring upload.
-
-date_format (defaults to "%a, %b %d %Y, %r"):
-  How to display the date in the user interface.  This is used for display
-  purposes only and has no symantic meaning.  Uses '%' escapes
-  from the UnixDate function in Date::Manip.
-
-log_file (defaults to "system/log/log-%Y-%m-%d.txt"):
-  
-
-assignments_dir (defaults to "assignments"):
-  The path to the directory containing assignment configuration files.
-  This path is relative to the working_dir.
-
-assignments_regex (defaults to "^(\w+)\.cfg$"):
-  A Perl regular expression.  Only files in the assignments_dir
-  directory that match this regular expression are treated as
-  assignment configurations.  The part of the filename that matches
-  the first capture buffer is treated as the assignment id.
-
-submissions_dir (defaults to "submissions"):
-  The path to the directory containing submissions.  This path is
-  relative to the working_dir.
+> The title that should be displayed at the top of all pages.  This
+> should usually be something like the class name.
 
 admins (list, defaults to the empty list):
-
-  The users that are application administrators.  They can see uploads
-  by other users.  As this is a list, one administrator is written per
-  line.
-
-user_override (defaults to the empty string):
-
-  This is an override for the user login and will be used as the login id
-  instead of the HTTPS user login.  Primarily useful for demo purposes
-  or a public site that shouldn't require login.
+> The users that are application administrators.  They can see uploads
+> by other users.  As this is a list, one administrator is written per
+> line.
 
 users (list, defaults to the empty list):
+> A list of users of the system.  This list is combined with the users
+> listed in the files specified by the "user_files" setting.  See
+> [User Configuration][] in this document for more information.
 
-  Maps each usernames (as a string) to
-   a dictionary that represents the configuration settings for that user.
-   That dictionary contains the following keys mapping to the described values.
-   - full_name: (String) The full name of the user.
-     Only used for display purposes.
-   - expires: (String) The date afterwhich this user should no longer be
-     allowed access.  Any date format parsable by Date::Manip is allowed.
+user_files (list, defaults to the empty list):
+> A list of files containing users of the system.  This list is
+> combined with the users specified by "users".  See [User Configuration][]
+> in this document for more information.
 
-users_file (defaults to the empty string):
-  header_lines -- id -- name -- expires -- filename
+user_override (defaults to the empty string):
+> This is an override for the user login and will be used as the login
+> id instead of the user login taken from the HTTPS headers.  This is
+> primarily useful for demo purposes or a public site that shouldn't
+> require login.
 
-text (defaults to the empty string)
-misc
+date_format (defaults to "%a, %b %d %Y, %r"):
+> How to display the date in the user interface.  This is used for
+> display purposes only and has no semantic meaning.  This uses "%"
+> escapes from the UnixDate function in the Date::Manip module from
+> CPAN.
+
+max_post_size (defaults to "1000000"):
+> The total number of bytes allowed to be uploaded in a connection.
+> Use this to prevent students from accidentally uploading excessively
+> large file.
+
+log_file (defaults to "system/log/log-%Y-%m-%d.txt"):
+> The location of the log file.  Uses "%" escapes from the UnixDate
+> function in the Date::Manip module from CPAN.
+
+path (defaults to "/usr/local/bin:/usr/bin:/bin"): 
+> The value of the PATH environment variable that guards and reports
+> should have in their environment when they are running.
+
+assignments_dir (defaults to "assignments"):
+> The path to the directory containing assignment configuration files.
+
+assignments_regex (defaults to "^(\w+)\.cfg$"):
+> Only files in the assignments_dir directory that match this Perl
+> regular expression are treated as assignment configurations.  The
+> part of the filename that matches the first capture buffer of this
+> regular expression is treated as the assignment id.
+
+submissions_dir (defaults to "submissions"):
+> The path to the directory containing submission directories.
 
 
 ## Assignment Configuration ##
 
 Assignment configurations are stored in the folder specified by the
-'assignments_dir' (default 'tiro/assignments').  Each file in the
-'assignments_dir' that matches the 'assignments_regex' (default
-'^(\w+)\.cfg$') is used as the assignment configuration for one
-assignment.  The assignment 'id' is the part of the filename that
-matches the first capture buffer of the 'assignments_regex'.
-The remaining properties of an assignment are set ...
+"assignments_dir" global configuration setting which defaults to
+"tiro/assignments/".  Each file in the "assignments_dir" that matches
+the "assignments_regex" global configuration setting is used as the
+assignment configuration for one assignment.  By default this is
+"^(\w+)\.cfg$" which matches all files ending with ".cfg".  The
+assignment "id" is the part of the filename that matches the first
+capture buffer of the "assignments_regex".  With the default setting
+this is the parts of the file name before the ".cfg" at the end.
+
+The configuration file body text is HTML code that is inserted after
+the assignment title and before the upload form when a user views a
+particular assignment.  The HTML code is placed in a "div" tag and is
+usually a description of the assignment or any special instructions
+the user should know about uploading.
+
+The following section lists all the settings that can be set in an
+assignment configuration.
 
 
+### Option List ###
 
 title (defaults to the empty string):
 
-  The assignment title.  Should be more friendly and readable than the
-  assignment id.  Only used for display purposes.
+> The assignment title.  Should be more friendly and readable than the
+> assignment id.  Only used for display purposes.
 
 due (defaults to the empty string):
+> The due date to display for the assignment.
+> If it is the empty string, then no due date is displayed.
+> Any date format parsable by the Date::Manip module from CPAN is allowed.
 
-  The date that the folder is due.
-  Any date format parsable by Date::Manip is allowed.
-  Submissions after this date are considered late.
-  If it is the empty string, then no due date is displayed
-  and no submissions are considered late.
+late_after (defaults to the empty string):
+> The date after which assignment submissions are considered late.  If
+> it is the empty string, then "due" is used.  Use this to allow a
+> little bit of leeway in submission times.  For example by setting it
+> five minutes after the official due date.  Any date format parsable
+> by the Date::Manip module from CPAN is allowed.
 
 hidden_until (defaults to the empty string):
-
-  The date before which the assignment is hidden from non-admin users.
-  Any date format parsable by Date::Manip is allowed.  If it is the
-  empty string, then the assignment is never hidden.
+> The date before which the assignment is hidden from
+> non-administrator users.  If it is the empty string, then the
+> assignment is not hidden.  Use this to allow administrators to
+> proofread and test an assignment before making it accessible to
+> students.  Any date format parsable by the Date::Manip module from
+> CPAN is allowed.
 
 file_count (defaults to the empty string):
-
-  The number of file upload fields to use when showing the file upload
-  form.  Note that both zero and the empty string are valid values but
-  they are different.  Zero causes there to be no file upload field
-  but there to still be a submission button.  An empty string causes
-  there to be neither upload fields not a submission button.
+> The number of file upload fields to show in the file upload form.
+> If it is the empty string, then there to be neither upload fields
+> nor a submission button.  Note zero is different than the empty
+> string as zero causes there to be no file upload fields but there
+> still to be a submission button.
 
 reports (list, defaults to the empty list):
+> TODO
+
 guards (list, defaults to the empty list):
+> TODO
 
 validators (list, defaults to the empty list):
-
-  A list of checkers to run on submissions for this folder.
-    Each element of the array is itself a two element array.
-    - The first element is a string indicating the name of the checker.
-      The first element only used for display purposes.
-    - The second element is the program to run for the checker and
-      is represented as an array of strings.
-      The first string is the program the other strings are the arguments
-      to the program.  The directory containing a particular submission
-      is passed as a final argument after the arguments specified in this array.
+> A list of checkers to run on submissions for this folder.
+>   Each element of the array is itself a two element array.
+>   - The first element is a string indicating the name of the checker.
+>     The first element only used for display purposes.
+>   - The second element is the program to run for the checker and
+>     is represented as an array of strings.
+>     The first string is the program the other strings are the arguments
+>     to the program.  The directory containing a particular submission
+>     is passed as a final argument after the arguments specified in this array.
 
 text_file (defaults to the empty string):
-
-text (defaults to the empty string):
-HTML code that is inserted after the title and before the upload form.  The HTML code is placed in a div tag and is usually a description of the folder or any special instructions the user should now before uploading.
-misc
-
+> TODO
 
 ## User Configuration ##
 
+TODO
+
 Users are defined either in the global configuration file or the user
-configuration file.
+configuration file.  Whether defined in the global or the user
+configuration file, each user has three properties: an id, a full name
+and whether they are an application administrator.
 
-Whether defined in the global or the user configuration file, each
-user has four properties.
+- The "id" is the user name of the user.  It is used for login and the
+file submissions.
 
-id:
-  the user name of the user, this must match the 
-full_name:
-  the 
-expiration date:
+- The "full_name" a full name for the user.  It is used for display
+purposes only.
+
+- A user is an application administrator if and only if they are
+listed in the "admins" option in the global configuration.  An
+application administrator can see submissions by other uses and can
+also impersonate other users.
+
+User configurations stored in the global configuration file with the
+"users" setting.  Each line consists of the user "id" followed by the
+"full_name" and separated by "--".
+
+User configuration stored in the user configuration file are stored in
+the CSV (comma-separated value) files listed in the "user_files"
+setting.  As the "user_files" setting is a list, the specification
+each "user_files" line in the global configuration specifies another
+CSV.  Each "user_files" line consists of four sub-fields separated by
+"--".
+
+- The first sub-field is the number of header lines to skip at the
+  start of the CSV file.  Every line after that specifies one user.
+
+- The second and third sub-fields are the zero-based column numbers of
+  the "id" and "full_name" for each user.
+
+- The fourth sub-field is the filename of the CSV file.
+
+The CSV parser is fairly basic but it does understand the use of
+double quotes to escape commas (",") inside fields.  Specifically each
+line is split using the Perl expression "quotewords(",", 0, $_)".
 
 
+## Reports and Guards ##
 
+TODO
 
-Each user has four properties
-id, full name, expiration date, is admin
+Both reports and guard are external programs that are called to give
+feedback about a particular assignment submission.  However, they have
+slight differences.
 
-A user
+Reports are purely informative.  They do not effect how the system
+handles the assignment in any way.  The output of reports is displayed
+incrementally as the page renders, so it is reasonable for a report to
+take a little while.  Reports are useful if you want to give feedback
+to a student but without refusing to accept the assignment (e.g. an
+auto-grader system).
 
+Guards are not purely informative.  They determine whether an
+assignment counts as a successful submission.  Guards are run during
+the initial upload process and their output is buffered, so it is
+important for a guard to run quickly and not take a long time to run.
+Guards are useful if you want to run quick sanity checks that if
+failed should prevent an upload from even counting (e.g. zero length
+file or wrong file name).  Since guards prevent successful uploads,
+they should generally only be used for sanity checks that are quick
+and easy for a student to fix.  For more extensive tests (e.g. unit
+tests), use reports instead because while they give feedback to the student
+they do not prevent the files from uploading.
 
-##  ##
+TODO
 
-TIRO_CONFIG_FILE'} = CONFIG_FILE; # DANGER: wrong path
-TIRO_LOGIN_ID'} = $login_id;
+Real vs effective login
+
+### Environment Variables ###
+
+TODO
+
+TIRO_CONFIG_FILE:
+> Path to the global configuration file.
+
+TIRO_LOGIN_ID:
+> User id of the effective login.
 
 TIRO_LOGIN_IS_ADMIN:
- Whether the user for the submission is an administrator.
- - 0 if the user is not an admin
- - 1 if the user is an admin
+> Whether the effective login user is an application administrator.
+> - 0 if the user is not an administrator
+> - 1 if the user is an administrator
+
+TIDO_REAL_LOGIN_ID:
+> User id of the real login.
+
+TIDO_REAL_LOGIN_IS_ADMIN:
+> Whether the real login user is an application administrator.
+> - 0 if the user is not an administrator
+> - 1 if the user is an administrator
 
 TIRO_SUBMISSION_DIR:
-  The relative path to the directory containing the submission.
+> The relative path to the directory containing the submission.
 
 TIRO_SUBMISSION_USER:
-  The id of the user for the submission.
+> The id of the user for the submission.
+
 TIRO_SUBMISSION_DATE:
-  The date of the submission in canonical form.
+> The date of the submission in canonical form.
 
 TIRO_ASSIGNMENT_FILE:
-  The path to the configuration file for the assignment of the submission.
+> The path to the configuration file for the assignment of the submission.
 
-TIRO_ASSIGNMENT:
-  The id of the assignment of the submission.
+TIRO_ASSIGNMENT_ID:
+> The id of the assignment of the submission.
 
 TIRO_ASSIGNMENT_TITLE:
-  The title of the assignment of the submission.
+> The title of the assignment of the submission.
 
 TIRO_ASSIGNMENT_LATE_AFTER:
-  The late_after of the assignment of the submission.
+> The late_after of the assignment of the submission.
+
 TIRO_ASSIGNMENT_DUE:
-  The due date of the assignment of the submission.
+> The due date of the assignment of the submission.
+
 TIRO_ASSIGNMENT_FILE_COUNT:
-  The file_count of the assignment of the submission.
+> The file_count of the assignment of the submission.

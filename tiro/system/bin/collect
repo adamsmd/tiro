@@ -1,0 +1,24 @@
+#! /usr/bin/perl -T
+use warnings; # Full warnings
+use strict; # Strict error checking
+$|++; # Unbuffer stdout
+umask 0077; # Default to private files
+delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)}; # Make %ENV safer
+
+# Configuration
+use constant CONFIG_FILE => '../config.cfg';
+use lib 'system/lib';
+
+$ASSIGNMENT
+$LASTEST
+$DEST
+
+for $user ($assignment->dir) {
+  my ($latest) = sort {$b cmp $a}
+  grep { not $_->failed }
+  grep { $_ le $LATEST } ($assignment->user->date);
+
+  if (defined $latest) {
+    copy -r $latest $user
+  }
+}
