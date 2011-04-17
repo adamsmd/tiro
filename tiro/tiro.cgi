@@ -33,7 +33,7 @@ use List::MoreUtils qw/:all/;
 struct Row=>{assignment=>'AssignmentConfig', user=>'UserConfig',
              date=>'$', files=>'@', failed=>'$', late=>'$'};
 struct File=>{name=>'$', size=>'$'};
-struct Upload=>{name=>'$', handle=>'$'};
+struct UploadFile=>{name=>'$', handle=>'$'};
 
 ################
 # Bootstrap
@@ -58,7 +58,7 @@ $CGI::POST_MAX = $config->max_post_size;
 $ENV{PATH} = $config->path;
 my $q = CGI->new;
 panic("Connection limit (@{[$config->max_post_size]} bytes) exceeded.",
-      "Uploaded file too large?")
+      "Submitted file too large?")
   if ($q->cgi_error() || "") =~ /^413/; # 413 POST too large
 panic($q->cgi_error()) if $q->cgi_error();
 
@@ -81,8 +81,8 @@ sub bool { $_[0] ? 1 : 0; }
 # Basic Inputs
 my $now = date "now";
 define_param(
-  do_download => \&bool, do_upload => \&bool,
-  show_search_form => \&bool, show_upload_form => \&bool,
+  do_download => \&bool, do_submit => \&bool,
+  show_search_form => \&bool, show_submit_form => \&bool,
   show_results => \&bool, show_failed => \&bool,
   start_date => \&date, end_date => \&date, only_latest => \&bool,
   reports => \&bool, guards => \&bool, submitted => \&keyword, sort_by => \&keyword,
@@ -121,7 +121,8 @@ my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
 @assignments = intersect(\@all_assignments, sub {$_[0]->id}, \@assignments);
 
 my $download = file $q->param(FILE);
-my @uploads = map {Upload->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
+my @upload_files =
+  map {UploadFile->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 
 $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
 
@@ -131,12 +132,12 @@ $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
 
 error('Invalid file names (only "A-Za-z0-9_. -" characters allowed): ',
       join(", ", $q->param(FILE)))
-  unless not any { not defined $_->name } @uploads;
-error('Duplicate file names: ', map { $_->name } @uploads)
-  unless (map { $_->name } @uploads) == (uniq map { $_->name } @uploads);
+  unless not any { not defined $_->name } @upload_files;
+error('Duplicate file names: ', map { $_->name } @upload_files)
+  unless (map { $_->name } @upload_files) == (uniq map { $_->name } @upload_files);
 
 if (do_download()) { download(); }
-elsif (do_upload()) { upload(); }
+elsif (do_submit()) { upload(); }
 else { main_view(); }
 
 sub download {
@@ -155,17 +156,17 @@ sub download {
 }
 
 sub upload {
-  my $assignment = $assignments[0] or error("No assignment for upload.");
+  my $assignment = $assignments[0] or error("No assignment for submission.");
 
   my $date = "$now.tmp";
   my $target_dir = filename($assignment->id, $login_id, $date);
-  warn "Starting upload of @{[$_->name]} in $target_dir" for @uploads;
+  warn "Starting upload of @{[$_->name]} in $target_dir" for @upload_files;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->id]} for " .
                                "$login_id at $now: $!");
   my $umask = umask 0377;
-  for my $upload (@uploads) {
-    copy($upload->handle, catfile($target_dir, $upload->name)) or
-      error("Can't save @{[$upload->name]} in @{[$assignment->id]} " .
+  for my $upload_file (@upload_files) {
+    copy($upload_file->handle, catfile($target_dir, $upload_file->name)) or
+      error("Can't save @{[$upload_file->name]} in @{[$assignment->id]} " .
             "for $login_id at $now: $!");
   }
   umask $umask;
@@ -180,7 +181,7 @@ sub upload {
     warn "Exit code: $?";
     $error ||= $?;
   }
-  if ($error) { error("Upload failed:", @msg); }
+  if ($error) { error("Submission failed:", @msg); }
   move($target_dir, filename($assignment->id, $login_id, $now)) or
     error("Can't move TODO: $!");
   print $q->redirect(
@@ -218,7 +219,7 @@ sub main_view {
 
   pre_body();
 
-  if (show_upload_form()) {
+  if (show_submit_form()) {
     for my $a (@assignments) {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($a->id . ": ", $a->title);
@@ -236,7 +237,7 @@ sub main_view {
         say $q->hidden(-name=>REPORTS(), -value=>1, -override=>1);
         say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
           for (1..$a->file_count);
-        say $q->p($q->submit(DO_UPLOAD(), "Submit"));
+        say $q->p($q->submit(DO_SUBMIT(), "Submit"));
         say $q->end_form();
       }
       say $q->p(); # Add extra space before the final line
@@ -247,7 +248,7 @@ sub main_view {
   if (show_results()) {
     say $q->start_table({-class=>'results'});
     say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
-                                 "Reports", "Files", "Bytes"])));
+                                 "Reports", "", "Files", "Bytes"])));
     if (not @rows) {
       say row(7, $q->center('No results to display.',
                             'Browse or search to select assignment.'));
@@ -261,25 +262,26 @@ sub main_view {
           map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
                 $_->size] } @{$r->files} : ["(No files)", ""];
         say multirow([$r->assignment->id, $r->assignment->title,
-                      $r->user->id . ($r->user->is_admin ? " (admin)" : ""),
+                      $r->user->id . ($r->user->is_admin ? "&#x2605;" : ""),
                       $r->user->full_name,
                       ($r->date ?
                        (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
-                             pretty_date($r->date)) .
-                        ($r->late ? " (Late)" : "") .
-                        ($r->failed ? " - FAILED" : "")) :
-                       ("(Nothing submitted)"))], @file_rows);
+                             pretty_date($r->date)),
+                        ($r->failed ? "&nbsp;&#x2610;" : "&nbsp;&#x2611;") .
+                        ($r->late ? " (Late)" : "")) :
+                       ("(Nothing submitted)", ""))], @file_rows);
 
         if ($r->date and (reports() or guards())) {
           my @programs = ((guards() ? @{$r->assignment->guards} : ()),
                           (reports() ? @{$r->assignment->reports} : ()));
           say '<tr><td></td>';
-          say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
-          say "Submission received on @{[pretty_date($r->date)]}.";
+          say '<td colspan=8 style="background:rgb(95%,95%,95%);">';
+          say 'Submission ', ($r->failed ? 'FAILED' : 'succeeded');
+          say ' and is ', ($r->late ? 'LATE' : 'on time'), '.';
           say '</td></tr>';
           set_env($r->assignment, $r->user, $r->date);
           for my $program (@programs) {
-            say "<tr><td></td><td colspan=7><div>";
+            say "<tr><td></td><td colspan=8><div>";
             warn "Running guard or report: $program";
             system $program;
             warn "Exit code: $?";
@@ -292,7 +294,7 @@ sub main_view {
     say $q->end_table();
   }
 
-  say $config->text if not show_upload_form() and not show_results();
+  say $config->text if not show_submit_form() and not show_results();
   post_body();
 }
 
@@ -336,7 +338,7 @@ sub pre_body {
   .results { width:100%;border-collapse: collapse; }
   .results>thead { border-bottom:2px solid black; }
   .results>tbody { border-bottom:1px solid black; }
-  .results>tbody>TR:first-child>td+td+td+td+td+td+td { text-align:right; }
+  .results>tbody>TR:first-child>td+td+td+td+td+td+td+td { text-align:right; }
   .results>tbody>TR+TR>td+td { text-align:right; }
   .results>tbody>TR+TR>td+td[colspan] { text-align:left; }
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
@@ -373,7 +375,7 @@ EOT
     my $num_users = @all_users;
     my $late = (late_after($a) ne "" and $now ge late_after($a) and
                 not any {any {$_ le late_after($a)} @$_} @{$a->dates});
-    say row(1, href(form_url(SHOW_UPLOAD_FORM(), 1, SHOW_RESULTS(), 1,
+    say row(1, href(form_url(SHOW_SUBMIT_FORM(), 1, SHOW_RESULTS(), 1,
                              ASSIGNMENTS, $a->id), $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
             ($login->is_admin ? $q->small("&nbsp;($num_done/$num_users)"):"") .
@@ -401,10 +403,10 @@ EOT
       ["Assignment:", multilist(ASSIGNMENTS, map {$_->id} @all_assignments)],
       ["Show:", join($q->br(), map {$q->checkbox($_->[0],$_->[1],'y',$_->[2])}
                      ([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
-                      [SHOW_UPLOAD_FORM(), show_upload_form(), 'Upload Form'],
+                      [SHOW_SUBMIT_FORM(), show_submit_form(), 'Submit Form'],
                       [REPORTS(), reports(), 'Reports'],
                       [GUARDS(), guards(), 'Guards'],
-                      [SHOW_FAILED(), show_failed(), 'Failed Uploads']))],
+                      [SHOW_FAILED(), show_failed(), 'Failed Submissions']))],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
       ["<b>Advanced</b>", ""],
