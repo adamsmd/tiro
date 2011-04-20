@@ -30,10 +30,13 @@ use List::MoreUtils qw/:all/;
 # Structs
 ################
 
-struct Row=>{assignment=>'AssignmentConfig', user=>'UserConfig',
+struct Row=>{assignment=>'AssignmentConfig', user=>'UserConfig', group=>'@',
              date=>'$', files=>'@', failed=>'$', late=>'$'};
 struct File=>{name=>'$', size=>'$'};
 struct UploadFile=>{name=>'$', handle=>'$'};
+struct Date=>{user=>'$', group=>'@', date=>'$', suffix=>'$'};
+struct Submission=>{assignment=>'AssignmentConfig', user=>'UserConfig',
+                    group=>'@', date=>'$', files=>'@', failed=>'$', late=>'$'};
 
 ################
 # Bootstrap
@@ -41,7 +44,7 @@ struct UploadFile=>{name=>'$', handle=>'$'};
 
 my $start_time = time();
 
-set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})");
+set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})"); # Warning Prefix
 
 my $config = parse_global_config_file(CONFIG_FILE);
 
@@ -66,7 +69,7 @@ exists $ENV{$_} and warn("$_: ", $ENV{$_}) for
   ("REMOTE_HOST", "REMOTE_USER", "HTTP_REFERER", "HTTP_X_FORWARDED_FOR");
 warn "PARAM $_: ", join(":",$q->param($_)) for $q->param();
 
-my @real_all_users = sort {$a->id cmp $b->id} parse_user_configs($config);
+my %real_all_users = parse_user_configs($config);
 
 ################
 # Input Parsing
@@ -94,21 +97,16 @@ use constant {
 
 # Login
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
-my $login_id = my $real_login_id = file($tainted_user);
-my ($login) = my ($real_login) = grep {$_->id eq $login_id} @real_all_users;
 
-panic('Malformed login id "' . $tainted_user . '".', "Missing HTTPS?")
-  unless $login_id;
-panic("No such user: $login_id")
-  unless defined $login;
+my $login = my $real_login = $real_all_users{$tainted_user};
+panic("No such user: $tainted_user.", "Missing HTTPS?") unless defined $login;
 
 if ($login->is_admin && user_override() ne "") {
-  $login_id = user_override();
-  ($login) = grep {$_->id eq $login_id} @real_all_users;
-  panic('Malformed login override "' . $login_id . '".') unless $login;
+  ($login) = $real_all_users{user_override()};
+  panic("No such user for override: " . user_override()) unless $login;
 }
 
-my @all_users = $login->is_admin ? @real_all_users : ($login);
+my @all_users = $login->is_admin ? sort {$a->id cmp $b->id} values %real_all_users : ($login);
 my @all_assignments = $login->is_admin ? list_assignments() :
   grep { $_->hidden_until le $now } list_assignments();
 
@@ -159,18 +157,18 @@ sub upload {
   my $assignment = $assignments[0] or error("No assignment for submission.");
 
   my $date = "$now.tmp";
-  my $target_dir = filename($assignment->id, $login_id, $date);
+  my $target_dir = filename($assignment->id, $login->id, $date);
   warn "Starting upload of @{[$_->name]} in $target_dir" for @upload_files;
   mkpath($target_dir) or error("Can't mkdir in @{[$assignment->id]} for " .
-                               "$login_id at $now: $!");
+                               $login->id . " at $now: $!");
   my $umask = umask 0377;
   for my $upload_file (@upload_files) {
     copy($upload_file->handle, catfile($target_dir, $upload_file->name)) or
       error("Can't save @{[$upload_file->name]} in @{[$assignment->id]} " .
-            "for $login_id at $now: $!");
+            "for @{[$login->id]} at $now: $!");
   }
   umask $umask;
-  chmod 0500, $target_dir;
+  chmod 0500, $target_dir; # lock down the submission directory
   warn "Upload done for $_ (@{[-s catfile($target_dir, $_)]} bytes)" .
     " in $target_dir" for dir_list($target_dir);
   my ($error, @msg) = (0);
@@ -182,12 +180,12 @@ sub upload {
     $error ||= $?;
   }
   if ($error) { error("Submission failed:", @msg); }
-  move($target_dir, filename($assignment->id, $login_id, $now)) or
+  move($target_dir, filename($assignment->id, $login->id, $now)) or
     error("Can't move TODO: $!");
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
       -uri=>form_url(SHOW_RESULTS(), 1, REPORTS(), reports(),
-                     ASSIGNMENTS, $assignment->id, USERS, $login_id,
+                     ASSIGNMENTS, $assignment->id, USERS, $login->id,
                      START_DATE(), $now, END_DATE(), $now));
 }
 
@@ -195,26 +193,27 @@ sub main_view {
   my @rows;
   for my $assignment (@assignments) {
     for my $user (@users) {
-      my @dates = list_dates($assignment->id, $user->id);
-      push @rows, Row->new(assignment=>$assignment, user=>$user,
-                           date=>'', files=>[], late=>0)
+      my @dates = list_submissions($assignment, $user);
+      push @rows, Row->new(assignment=>$assignment, user=>empty_user(), date=>'', late=>0,
+                           group=>$assignment->groups->{$user->id}, files=>[])
         if submitted() ne SUBMITTED_YES and not @dates;
-      for (@dates) {
-        push @rows, Row->new(
-          assignment=>$assignment, user=>$user, date=>$_->[0],
-          files=>[list_files($assignment, $user, $_->[0].$_->[1])],
-          late=>($_->[0] gt late_after($assignment)), failed=>$_->[1] ne "")
-          if submitted() ne SUBMITTED_NO;
-      }
+      push @rows, @dates if submitted() ne SUBMITTED_NO;
     }
   }
+  my %seen;
+  @rows = grep { ! $seen{$_->assignment->id."/".$_->user->id."/".$_->date}++} @rows;
+#  @rows = intersect(@rows, sub {$_->assignment, @rows);
 
-  @rows = sort {(sort_by() eq SORT_USER and $a->user->id cmp $b->user->id)
+  @rows = sort {(sort_by() eq SORT_USER and
+                 join('\x00', map {$_->id} @{$a->group}) cmp
+                 join('\x00', map {$_->id} @{$b->group}))
                   or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
-                  or (sort_by() eq SORT_FULL_NAME
-                      and $a->user->full_name cmp $b->user->full_name)
+                  or (sort_by() eq SORT_FULL_NAME and
+                      join('\x00', map {$_->full_name} @{$a->group}) cmp
+                      join('\x00', map {$_->full_name} @{$b->group}))
                   or ($a->assignment->id cmp $b->assignment->id)
-                  or ($a->user->id cmp $b->user->id)
+                  or (join('\x00', map {$_->id} @{$a->group}) cmp
+                      join('\x00', map {$_->id} @{$b->group}))
                   or ($a->date cmp $b->date) } @rows;
 
   pre_body();
@@ -248,47 +247,65 @@ sub main_view {
   if (show_results()) {
     say $q->start_table({-class=>'results'});
     say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
-                                 "Reports", "", "Files", "Bytes"])));
+                                 "Reports", "Files", "Bytes"])));
     if (not @rows) {
       say row(7, $q->center('No results to display.',
                             'Browse or search to select assignment.'));
     } else {
+      my @cells = ();
       for my $r (@rows) {
-        say $q->start_tbody();
+        #say $q->start_tbody();
         my @url = (ASSIGNMENTS, $r->assignment->id, USERS, $r->user->id,
                    START_DATE(), $r->date, END_DATE(), $r->date,
                    SHOW_FAILED(), $r->failed);
         my @file_rows = @{$r->files} ?
           map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
-                $_->size] } @{$r->files} : ["(No files)", ""];
-        say multirow([$r->assignment->id, $r->assignment->title,
-                      $r->user->id . ($r->user->is_admin ? "&#x2605;" : ""),
-                      $r->user->full_name,
-                      ($r->date ?
-                       (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
-                             pretty_date($r->date)),
-                        ($r->failed ? "&nbsp;&#x2610;" : "&nbsp;&#x2611;") .
-                        ($r->late ? " (Late)" : "")) :
-                       ("(Nothing submitted)", ""))], @file_rows);
+                "<span class='bytes'>".$_->size."</span>"] } @{$r->files} : ["(No files)", ""];
+        my $num_files = @file_rows;
+          my @new_cells = 
+            ($r->assignment->id, $r->assignment->title,
+             join("; ",map {((not $r->user->id or $_->id eq $r->user->id) ? $_->id : $q->em($_->id)).
+                  ($_->is_admin ? " (admin)" : "")} @{$r->group}),
+             join("; ",map {(not $r->user->id or $_->id eq $r->user->id) ? $_->full_name : $q->em($_->full_name)} @{$r->group}),
+             ($r->date ?
+              (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
+                    pretty_date($r->date)) .
+               ($r->late ? " (Late)" : "") .
+               ($r->failed ? " - FAILED" : "")) :
+              ("(Nothing submitted)", "")));
+          my $i = firstidx {$_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
+ 
+          say "<tr><td colspan='$i' rowspan='$num_files'></td>" if $i;
+          say "<td style='border-top:solid 1px black;' rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
+
+        for my $j (0..$#file_rows) {
+          say $j == 0 ? "<td style='border-top:solid 1px black;'>" : "<td>";
+          say $file_rows[$j]->[0], "</td>";
+          say $j == 0 ? "<td style='border-top:solid 1px black;'>" : "<td>";
+          say $file_rows[$j]->[1], "</td></tr>";
+          say "<tr>";
+        }
+          say "</tr>";
+          @cells = @new_cells;
 
         if ($r->date and (reports() or guards())) {
           my @programs = ((guards() ? @{$r->assignment->guards} : ()),
                           (reports() ? @{$r->assignment->reports} : ()));
           say '<tr><td></td>';
-          say '<td colspan=8 style="background:rgb(95%,95%,95%);">';
+          say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
           say 'Submission ', ($r->failed ? 'FAILED' : 'succeeded');
           say ' and is ', ($r->late ? 'LATE' : 'on time'), '.';
           say '</td></tr>';
           set_env($r->assignment, $r->user, $r->date);
           for my $program (@programs) {
-            say "<tr><td></td><td colspan=8><div>";
+            say "<tr><td></td><td colspan=7><div>";
             warn "Running guard or report: $program";
             system $program;
             warn "Exit code: $?";
             say "</div></td></tr>";
           }
         }
-        say $q->end_tbody();
+        #say $q->end_tbody();
       }
     }
     say $q->end_table();
@@ -338,9 +355,9 @@ sub pre_body {
   .results { width:100%;border-collapse: collapse; }
   .results>thead { border-bottom:2px solid black; }
   .results>tbody { border-bottom:1px solid black; }
-  .results>tbody>TR:first-child>td+td+td+td+td+td+td+td { text-align:right; }
-  .results>tbody>TR+TR>td+td { text-align:right; }
-  .results>tbody>TR+TR>td+td[colspan] { text-align:left; }
+  .results>.bytes { text-align:right; }
+/*  .results>tbody>TR+TR>td+td { text-align:right; }*/
+/*  .results>tbody>TR+TR>td+td[colspan] { text-align:left; }*/
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
   .body { margin-left:21em; }
   .footer { clear:left; text-align:right; font-size: small; }
@@ -348,10 +365,10 @@ sub pre_body {
   .hidden_until { color:red; }
 EOT
 
-  my $user_id = $login_id;
+  my $user_id = $login->id;
   if ($real_login->is_admin) {
     $user_id = $q->popup_menu(
-      USER_OVERRIDE(), [map {$_->id} @real_all_users], $login_id);
+      USER_OVERRIDE(), [sort keys %real_all_users], $login->id);
     $user_id .= $q->submit(-value=>'Change user');
     for ($q->param) {
       $user_id .= "\n" . $q->hidden(-name=>$_, -default=>$q->param($_))
@@ -448,9 +465,9 @@ sub post_body {
 sub set_env {
   my ($assignment, $user, $date) = @_;
   $ENV{'TIRO_CONFIG_FILE'} = CONFIG_FILE;
-  $ENV{'TIRO_LOGIN_ID'} = $login_id;
+  $ENV{'TIRO_LOGIN_ID'} = $login->id;
   $ENV{'TIRO_LOGIN_IS_ADMIN'} = $login->is_admin;
-  $ENV{'TIRO_REAL_LOGIN_ID'} = $real_login_id;
+  $ENV{'TIRO_REAL_LOGIN_ID'} = $real_login->id;
   $ENV{'TIRO_REAL_LOGIN_IS_ADMIN'} = $real_login->is_admin;
 
   $ENV{'TIRO_SUBMISSION_DIR'} = filename($assignment->id, $user->id, $date);
@@ -473,26 +490,40 @@ sub list_assignments {
         my ($id) = $_ =~ $config->assignments_regex;
         if (not defined $id) { (); }
         else {
-          my $assignment = parse_assignment_file(
+          my $assignment = parse_assignment_file(\%real_all_users,
             catfile($config->assignments_dir, $path));
-          $assignment->dates([map {[map {$_->[0]} list_dates($id, $_->id, 1)]}
-                              @all_users]);
           $assignment->id($id);
           $assignment->path($path);
+          $assignment->dates([map {[map {$_->date} list_submissions($assignment, $_, 1)]}
+                              @all_users]);
           $assignment;
         }
   } dir_list($config->assignments_dir);
 }
 
-sub list_dates {
+sub list_submissions {
   my ($assignment, $user, $all) = @_;
-  my @dates = map { /^(.*?)((\.tmp)?)$/; [date($1), $2] } dir_list(
-    $config->submissions_dir, $assignment, $user);
-  @dates = grep { -d filename($assignment, $user, $_->[0] . $_->[1]) } @dates;
-  @dates = grep {start_date() le $_->[0]} @dates if not $all and start_date();
-  @dates = grep {end_date() ge $_->[0]} @dates if not $all and end_date();
-  @dates = grep {not $_->[1]} @dates if $all or not show_failed();
+
+  my @dates;
+  my @users = @{$assignment->groups->{$user->id}};
+  for my $u (@users) {
+    for my $d (dir_list($config->submissions_dir,$assignment->id,$u->id)) {
+      $d =~ /^(.*?)((\.tmp)?)$/;
+      push @dates, 
+        Row->new(
+          assignment=>$assignment, user=>$u, group=>$assignment->groups->{$u->id}, date=>date($1),
+          failed=>$2, files=>[list_files($assignment, $u, $1.$2)],
+          late=>($1 gt late_after($assignment)), failed=>$2 ne '');
+    }
+  }
+
+  @dates = grep { -d filename($assignment->id, $_->user->id, $_->date.$_->failed) } @dates;
+  @dates = grep {start_date() le $_->date} @dates if not $all and start_date();
+  @dates = grep {end_date() ge $_->date} @dates if not $all and end_date();
+  @dates = grep {not $_->failed} @dates if $all or not show_failed();
+  @dates = sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id} @dates;
   @dates = ($dates[$#dates]) if !$all and $#dates != -1 and only_latest();    
+
   return @dates;
 }
 
@@ -522,7 +553,7 @@ sub define_param {
 
 sub form_url {
   my %args = @_;
-  $args{USER_OVERRIDE()} = user_override() if $real_login_id ne $login_id;
+  $args{USER_OVERRIDE()} = user_override() if $real_login->id ne $login->id;
   return "?" . join "&", map {"$_=$args{$_}"} keys %args;
 }
 
@@ -558,6 +589,8 @@ sub intersect {
   my ($list1, $fun, $list2) = @_;
   my %a = map {($_,1)} @{$_[2]};
   sort {&$fun($a) cmp &$fun($b)} grep {$a{$_[1]->($_)}} @{$_[0]}
+#  my %a = map {(&$fun($_),$_)} @{$list2};
+#  sort {&$fun($a) cmp &$fun($b)} grep {$a{&$fun($_)}} @{$list1}
 }
 
 sub dir_list {

@@ -12,6 +12,7 @@ use Text::ParseWords;
 # Modules not from Core
 use Date::Manip;
 use File::Slurp qw/slurp/; # Perl 6 feature
+use List::MoreUtils qw/:all/;
 
 =head1 NAME
 
@@ -46,7 +47,7 @@ if you don't export anything, such as for a purely object-oriented module.
 
 our @EXPORT = qw(
   parse_global_config_file parse_assignment_file parse_user_configs
-  GlobalConfig UserConfig AssignmentConfig);
+  GlobalConfig UserConfig AssignmentConfig empty_user);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -90,7 +91,7 @@ struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$'};
 struct AssignmentConfig=>{
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
-  guards=>'@', text=>'$', misc=>'%'};
+  guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
 
 =head2 parse_global_config_file
 
@@ -107,7 +108,7 @@ sub parse_global_config_file {
 
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
-                 map { my ($id, $name, $exp) = split(/\s*--\s*/, $_, 3);
+                 map { my ($id, $name) = quotewords(qr/\s+/, 0, $_);
                        ($id, { full_name => $name }) }
                  @{$c{'users'}});
 
@@ -122,14 +123,24 @@ sub parse_global_config_file {
 =cut
 
 sub parse_assignment_file {
-  my ($file, @lists) = @_;
+  my ($users, $file, @lists) = @_;
 
   my %file = parse_config_file(
-    $file, 'text', 'reports', 'guards', @lists);
+    $file, 'text', 'reports', 'guards', 'groups', @lists);
 
   $file{$_} = date($file{$_}) for ('due', 'late_after', 'hidden_until');
   defined $file{$_} or $file{$_} = "" for (
     'due', 'late_after', 'hidden_until', 'text_file', 'text', 'file_count');
+
+  my @groups = map {[quotewords(qr/\s+/, 0, $_)]} @{$file{'groups'}};
+  $file{'groups'} = {};
+  $file{'groups'}->{$_} = [$_] for (keys %$users);
+  for my $group (@groups) {
+    push @{$file{'groups'}->{$_}}, @$group for (@$group);
+
+  }
+  $file{'groups'}->{$_} = [map {$users->{$_}} (sort (uniq(@{$file{'groups'}->{$_}})))]
+    for (keys %$users);
 
   return AssignmentConfig->new(%file, misc=>\%file);
 }
@@ -147,7 +158,7 @@ sub parse_user_configs {
 
   for my $file (@{$global_config->user_files}) {
     my ($header_lines, $id_col, $full_name_col, $file_name) =
-      split(/\s*--\s*/, $file, 4);
+      quotewords(qr/\s+/, 0, $file);
 
     for (drop($header_lines || 0, split("\n", slurp $file_name))) {
       my @words = quotewords(",", 0, $_);
@@ -162,8 +173,10 @@ sub parse_user_configs {
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
-  return map { UserConfig->new(id => $_, %{$users{$_}}); } (keys %users);
+  return map { ($_, UserConfig->new(id => $_, %{$users{$_}})) } (keys %users);
 }
+
+sub empty_user { UserConfig->new(id => '', full_name => '', is_admin => '') }
 
 =head2 parse_config_file
 
