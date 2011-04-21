@@ -197,12 +197,12 @@ sub main_view {
   for my $assignment (@assignments) {
     # TODO: if include group members
     my @shown_users = @users ? @users : @all_users;
-    @shown_users = map {@{$assignment->groups->{$_->id}}} @shown_users
-      if show_group();
     @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
       unless $login->is_admin;
+#    @shown_users = map {@{$assignment->groups->{$_->id}}} @shown_users
+#      if show_group();
     for my $user (@shown_users) {
-      my @dates = list_submissions($assignment, $user);
+      my @dates = list_submissions($assignment, (show_group() ? @{$assignment->groups->{$user->id}} : ($user)));
       @dates = grep {start_date() le $_->date} @dates if start_date();
       @dates = grep {end_date() ge $_->date} @dates if end_date();
       @dates = grep {not $_->failed} @dates if not show_failed();
@@ -401,10 +401,10 @@ EOT
   say $q->h3("Select Assignment");
   say $q->start_table();
   for my $a (@all_assignments) {
-    my $num_done = (grep { @$_ } @{$a->dates});
+    my $num_done = @{$a->dates};
     my $num_users = keys %real_all_users;
     my $late = (late_after($a) ne "" and $now ge late_after($a) and
-                not any {any {$_ le late_after($a)} @$_} @{$a->dates});
+                not any {$_->date le late_after($a)} @{$a->dates});
     say row(1, href(form_url(SHOW_SUBMIT_FORM(), 1, SHOW_GROUP(), 1,
                              SHOW_RESULTS(), 1,
                              ASSIGNMENTS, $a->id), $a->id . ": ", $a->title),
@@ -426,8 +426,8 @@ EOT
   if (show_search_form()) {
     say $q->start_form(-action=>'#', -method=>'GET');
     say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
-    say $q->hidden(-name=>SHOW_SEARCH_FORM(), -default=>1);
-    say $q->hidden(-name=>SHOW_RESULTS(), -default=>1);
+    say map {$q->hidden(-name=>$_, -default=>1)} (
+      SHOW_SEARCH_FORM(), SHOW_RESULTS(), SHOW_GROUP());
     say $q->start_table({-class=>'search'});
     map { say row(1, @$_) } (
       ["User:", multilist(USERS, map {$_->id} @all_users)],
@@ -437,7 +437,6 @@ EOT
                       [SHOW_SUBMIT_FORM(), show_submit_form(), 'Submit Form'],
                       [REPORTS(), reports(), 'Reports'],
                       [GUARDS(), guards(), 'Guards'],
-                      [SHOW_GROUP(), show_group(), 'Group Submissions'],
                       [SHOW_FAILED(), show_failed(), 'Failed Submissions']))],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
@@ -509,40 +508,32 @@ sub list_assignments {
             catfile($config->assignments_dir, $path));
           $assignment->id($id);
           $assignment->path($path);
-          $assignment->dates([map {[map {$_->date} (map {grep {not $_->failed} list_submissions($assignment, $_)} @{$assignment->groups->{$_->id}})]}
-                              @all_users]);
+          $assignment->dates([
+            map { $_ ? $_ : () }
+            map {
+              firstval {not $_->failed}
+              sort {$a->date cmp $b->date}
+              list_submissions($assignment, @{$assignment->groups->{$_->id}})
+            } @all_users]);
           $assignment;
         }
   } dir_list($config->assignments_dir);
 }
 
 sub list_submissions {
-  my ($assignment, $user) = @_;
+  my ($assignment, @users) = @_;
 
   sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
   grep {-d filename($_->assignment->id, $_->user->id, $_->date.$_->failed)}
-  map { $_ =~ /^(.*?)((\.tmp)?)$/;
-        Submission->new(
-          assignment=>$assignment, user=>$user, date=>date($1),
-          group=>$assignment->groups->{$user->id},
-          failed=>$2, files=>[list_files($assignment, $user, $1.$2)],
-          late=>($1 gt late_after($assignment)), failed=>$2 ne '');
-  } dir_list($config->submissions_dir,$assignment->id,$user->id);
-
-#  my @subs;
-#  for (dir_list($config->submissions_dir,$assignment->id,$user->id)) {
-#    $_ =~ /^(.*?)((\.tmp)?)$/;
-#    push @subs, 
-#    Submission->new(
-#      assignment=>$assignment, user=>$user, date=>date($1),
-#      group=>$assignment->groups->{$user->id},
-#      failed=>$2, files=>[list_files($assignment, $user, $1.$2)],
-#      late=>($1 gt late_after($assignment)), failed=>$2 ne '');
-#  }
-#
-#  return sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
-#         grep {-d filename($_->assignment->id, $_->user->id, $_->date.$_->failed)}
-#         @subs;
+  map { my $user = $_;
+        map { $_ =~ /^(.*?)((\.tmp)?)$/;
+              Submission->new(
+                assignment=>$assignment, user=>$user, date=>date($1),
+                group=>$assignment->groups->{$user->id},
+                failed=>$2, files=>[list_files($assignment, $user, $1.$2)],
+                late=>($1 gt late_after($assignment)), failed=>$2 ne '');
+        } dir_list($config->submissions_dir,$assignment->id,$user->id)
+  } @users;
 }
 
 sub list_files {
