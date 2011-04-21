@@ -30,13 +30,11 @@ use List::MoreUtils qw/:all/;
 # Structs
 ################
 
-struct Row=>{assignment=>'AssignmentConfig', user=>'UserConfig', group=>'@',
-             date=>'$', files=>'@', failed=>'$', late=>'$'};
-struct File=>{name=>'$', size=>'$'};
-struct UploadFile=>{name=>'$', handle=>'$'};
-struct Date=>{user=>'$', group=>'@', date=>'$', suffix=>'$'};
 struct Submission=>{assignment=>'AssignmentConfig', user=>'UserConfig',
                     group=>'@', date=>'$', files=>'@', failed=>'$', late=>'$'};
+struct File=>{name=>'$', size=>'$'};
+
+struct UploadFile=>{name=>'$', handle=>'$'};
 
 ################
 # Bootstrap
@@ -86,10 +84,10 @@ my $now = date "now";
 define_param(
   do_download => \&bool, do_submit => \&bool,
   show_search_form => \&bool, show_submit_form => \&bool,
-  show_results => \&bool, show_failed => \&bool,
+  show_results => \&bool, show_failed => \&bool, show_group => \&bool,
   start_date => \&date, end_date => \&date, only_latest => \&bool,
-  reports => \&bool, guards => \&bool, submitted => \&keyword, sort_by => \&keyword,
-  user_override => \&keyword);
+  reports => \&bool, guards => \&bool, submitted => \&keyword,
+  sort_by => \&keyword, user_override => \&keyword);
 use constant {
   SUBMITTED_YES=>"sub_yes", SUBMITTED_NO=>"sub_no", SUBMITTED_ANY=>"sub_any",
   SORT_ASSIGNMENT=>'sort_assignment', SORT_USER=>'sort_user',
@@ -102,27 +100,31 @@ my $login = my $real_login = $real_all_users{$tainted_user};
 panic("No such user: $tainted_user.", "Missing HTTPS?") unless defined $login;
 
 if ($login->is_admin && user_override() ne "") {
-  ($login) = $real_all_users{user_override()};
+  $login = $real_all_users{user_override()};
   panic("No such user for override: " . user_override()) unless $login;
 }
 
-my @all_users = $login->is_admin ? sort {$a->id cmp $b->id} values %real_all_users : ($login);
-my @all_assignments = $login->is_admin ? list_assignments() :
-  grep { $_->hidden_until le $now } list_assignments();
+my @all_users = $login->is_admin ?
+  sort {$a->id cmp $b->id} values %real_all_users : ($login);
+my @all_assignments = $login->is_admin ?
+  list_assignments() : grep { $_->hidden_until le $now } list_assignments();
 
 # Other inputs
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
-my @users = $q->param(USERS) ? $q->param(USERS) : map {$_->id} @all_users;
-@users = intersect(\@all_users, sub {$_[0]->id}, \@users);
+my @users = select_by_id([values %real_all_users], $q->param(USERS));
 
-my @assignments = map { file $_ } $q->param(ASSIGNMENTS);
-@assignments = intersect(\@all_assignments, sub {$_[0]->id}, \@assignments);
+my @assignments = select_by_id(
+  \@all_assignments, map { file $_ } $q->param(ASSIGNMENTS));
 
 my $download = file $q->param(FILE);
 my @upload_files =
   map {UploadFile->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 
 $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
+sub same_group {
+  my ($assignment, $user1, $user2) = @_;
+  (grep {$user2->id eq $_->id} @{$assignment->groups->{$user1->id}}) ? 1 : 0;
+}
 
 ################
 # Main Code
@@ -131,23 +133,24 @@ $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
 error('Invalid file names (only "A-Za-z0-9_. -" characters allowed): ',
       join(", ", $q->param(FILE)))
   unless not any { not defined $_->name } @upload_files;
-error('Duplicate file names: ', map { $_->name } @upload_files)
-  unless (map { $_->name } @upload_files) == (uniq map { $_->name } @upload_files);
+{ my @x = map { $_->name } @upload_files;
+  error('Duplicate file names: ', join(", ", @x)) unless @x == uniq @x; }
 
 if (do_download()) { download(); }
 elsif (do_submit()) { upload(); }
 else { main_view(); }
 
 sub download {
-  @assignments or error("No assignment for download");
-  @users or error("No user for download");
-  start_date() or error("No date for download");
-  defined $download or error("No file for download");
+  @assignments or error("No valid assignment for download");
+  @users and ($login->is_admin or same_group($assignments[0], $users[0], $login)) or
+    error("No valid user for download");
+  start_date() or error("No valid date for download");
+  defined $download or error("No valid file for download");
   my ($assignment, $user) = ($assignments[0]->id, $users[0]->id);
   my $path = filename($assignment, $user, start_date() .
                       (show_failed() ? ".tmp" : ""), $download);
   -f $path and -r $path or
-    error("Can't read $download in $assignment for $user at @{[start_date()]}");
+    error("Can't get $download in $assignment for $user at @{[start_date()]}");
   print $q->header(-type=>'application/octet-stream',
                    -attachment=>$download, -Content_length=>-s $path);
   copy($path, *STDOUT) or die "Failed to send download: ", $!;
@@ -192,16 +195,27 @@ sub upload {
 sub main_view {
   my @rows;
   for my $assignment (@assignments) {
-    for my $user (@users) {
+    # TODO: if include group members
+    my @shown_users = @users ? @users : @all_users;
+    @shown_users = map {@{$assignment->groups->{$_->id}}} @shown_users
+      if show_group();
+    @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
+      unless $login->is_admin;
+    for my $user (@shown_users) {
       my @dates = list_submissions($assignment, $user);
-      push @rows, Row->new(assignment=>$assignment, user=>empty_user(), date=>'', late=>0,
+      @dates = grep {start_date() le $_->date} @dates if start_date();
+      @dates = grep {end_date() ge $_->date} @dates if end_date();
+      @dates = grep {not $_->failed} @dates if not show_failed();
+      @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
+
+      push @rows, Submission->new(assignment=>$assignment, user=>empty_user(), date=>'', late=>0,
                            group=>$assignment->groups->{$user->id}, files=>[])
         if submitted() ne SUBMITTED_YES and not @dates;
       push @rows, @dates if submitted() ne SUBMITTED_NO;
     }
   }
   my %seen;
-  @rows = grep { ! $seen{$_->assignment->id."/".$_->user->id."/".$_->date}++} @rows;
+  @rows = grep { ! $seen{$_->assignment->id.'\x00'.$_->user->id.'\x00'.$_->date}++} @rows;
 #  @rows = intersect(@rows, sub {$_->assignment, @rows);
 
   @rows = sort {(sort_by() eq SORT_USER and
@@ -264,12 +278,11 @@ sub main_view {
         my $num_files = @file_rows;
           my @new_cells = 
             ($r->assignment->id, $r->assignment->title,
-             join("; ",map {((not $r->user->id or $_->id eq $r->user->id) ? $_->id : $q->em($_->id)).
-                  ($_->is_admin ? " (admin)" : "")} @{$r->group}),
-             join("; ",map {(not $r->user->id or $_->id eq $r->user->id) ? $_->full_name : $q->em($_->full_name)} @{$r->group}),
+             join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
+             join("; ",map {$_->full_name} @{$r->group}),
              ($r->date ?
               (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
-                    pretty_date($r->date)) .
+                    pretty_date($r->date) . ' [' . $r->user->id . ']') .
                ($r->late ? " (Late)" : "") .
                ($r->failed ? " - FAILED" : "")) :
               ("(Nothing submitted)", "")));
@@ -389,10 +402,11 @@ EOT
   say $q->start_table();
   for my $a (@all_assignments) {
     my $num_done = (grep { @$_ } @{$a->dates});
-    my $num_users = @all_users;
+    my $num_users = keys %real_all_users;
     my $late = (late_after($a) ne "" and $now ge late_after($a) and
                 not any {any {$_ le late_after($a)} @$_} @{$a->dates});
-    say row(1, href(form_url(SHOW_SUBMIT_FORM(), 1, SHOW_RESULTS(), 1,
+    say row(1, href(form_url(SHOW_SUBMIT_FORM(), 1, SHOW_GROUP(), 1,
+                             SHOW_RESULTS(), 1,
                              ASSIGNMENTS, $a->id), $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
             ($login->is_admin ? $q->small("&nbsp;($num_done/$num_users)"):"") .
@@ -423,6 +437,7 @@ EOT
                       [SHOW_SUBMIT_FORM(), show_submit_form(), 'Submit Form'],
                       [REPORTS(), reports(), 'Reports'],
                       [GUARDS(), guards(), 'Guards'],
+                      [SHOW_GROUP(), show_group(), 'Group Submissions'],
                       [SHOW_FAILED(), show_failed(), 'Failed Submissions']))],
       ["", $q->submit(-value=>"Search")],
       ["","&nbsp;"],
@@ -494,7 +509,7 @@ sub list_assignments {
             catfile($config->assignments_dir, $path));
           $assignment->id($id);
           $assignment->path($path);
-          $assignment->dates([map {[map {$_->date} list_submissions($assignment, $_, 1)]}
+          $assignment->dates([map {[map {$_->date} (map {grep {not $_->failed} list_submissions($assignment, $_)} @{$assignment->groups->{$_->id}})]}
                               @all_users]);
           $assignment;
         }
@@ -502,29 +517,32 @@ sub list_assignments {
 }
 
 sub list_submissions {
-  my ($assignment, $user, $all) = @_;
+  my ($assignment, $user) = @_;
 
-  my @dates;
-  my @users = @{$assignment->groups->{$user->id}};
-  for my $u (@users) {
-    for my $d (dir_list($config->submissions_dir,$assignment->id,$u->id)) {
-      $d =~ /^(.*?)((\.tmp)?)$/;
-      push @dates, 
-        Row->new(
-          assignment=>$assignment, user=>$u, group=>$assignment->groups->{$u->id}, date=>date($1),
-          failed=>$2, files=>[list_files($assignment, $u, $1.$2)],
+  sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
+  grep {-d filename($_->assignment->id, $_->user->id, $_->date.$_->failed)}
+  map { $_ =~ /^(.*?)((\.tmp)?)$/;
+        Submission->new(
+          assignment=>$assignment, user=>$user, date=>date($1),
+          group=>$assignment->groups->{$user->id},
+          failed=>$2, files=>[list_files($assignment, $user, $1.$2)],
           late=>($1 gt late_after($assignment)), failed=>$2 ne '');
-    }
-  }
+  } dir_list($config->submissions_dir,$assignment->id,$user->id);
 
-  @dates = grep { -d filename($assignment->id, $_->user->id, $_->date.$_->failed) } @dates;
-  @dates = grep {start_date() le $_->date} @dates if not $all and start_date();
-  @dates = grep {end_date() ge $_->date} @dates if not $all and end_date();
-  @dates = grep {not $_->failed} @dates if $all or not show_failed();
-  @dates = sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id} @dates;
-  @dates = ($dates[$#dates]) if !$all and $#dates != -1 and only_latest();    
-
-  return @dates;
+#  my @subs;
+#  for (dir_list($config->submissions_dir,$assignment->id,$user->id)) {
+#    $_ =~ /^(.*?)((\.tmp)?)$/;
+#    push @subs, 
+#    Submission->new(
+#      assignment=>$assignment, user=>$user, date=>date($1),
+#      group=>$assignment->groups->{$user->id},
+#      failed=>$2, files=>[list_files($assignment, $user, $1.$2)],
+#      late=>($1 gt late_after($assignment)), failed=>$2 ne '');
+#  }
+#
+#  return sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
+#         grep {-d filename($_->assignment->id, $_->user->id, $_->date.$_->failed)}
+#         @subs;
 }
 
 sub list_files {
@@ -585,12 +603,10 @@ sub multirow {
 # General Utils
 ################
 
-sub intersect {
-  my ($list1, $fun, $list2) = @_;
-  my %a = map {($_,1)} @{$_[2]};
-  sort {&$fun($a) cmp &$fun($b)} grep {$a{$_[1]->($_)}} @{$_[0]}
-#  my %a = map {(&$fun($_),$_)} @{$list2};
-#  sort {&$fun($a) cmp &$fun($b)} grep {$a{&$fun($_)}} @{$list1}
+sub select_by_id {
+  my ($list1, @list2) = @_;
+  my %a = map {($_,1)} @list2;
+  sort {$a->id cmp $b->id} grep {$a{$_->id}} @{$list1}
 }
 
 sub dir_list {

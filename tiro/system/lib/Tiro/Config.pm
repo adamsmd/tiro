@@ -76,11 +76,8 @@ my %global_config_default = (
   admins => [],
   user_override => '',
   users => {},
-  users_file=>'',
+  user_files=>[],
   );
-
-defined $global_config_default{$_} or $global_config_default{$_} = ""
-  for ('config_file', 'log_file', 'users_file');
 
 struct GlobalConfig=>{
   title=>'$', admins=>'*@', user_override=>'$', users=>'*%', user_files=>'@', 
@@ -159,6 +156,7 @@ sub parse_user_configs {
   for my $file (@{$global_config->user_files}) {
     my ($header_lines, $id_col, $full_name_col, $file_name) =
       quotewords(qr/\s+/, 0, $file);
+    warn "H:$header_lines, $id_col, $full_name_col, $file_name";
 
     for (drop($header_lines || 0, split("\n", slurp $file_name))) {
       my @words = quotewords(",", 0, $_);
@@ -172,6 +170,8 @@ sub parse_user_configs {
 
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
+
+  warn join(':', keys %users);
 
   return map { ($_, UserConfig->new(id => $_, %{$users{$_}})) } (keys %users);
 }
