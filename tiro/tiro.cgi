@@ -210,8 +210,8 @@ sub main_view {
 
       warn $#dates;
       push @rows, Submission->new(
-        assignment=>$assignment, user=>@{$assignment->groups->{$user->id}}[0], date=>'', late=>0,
-        group=>$assignment->groups->{$user->id}, files=>[])
+        assignment=>$assignment, user=>@{$assignment->groups->{$user->id}}[0],
+        date=>'', late=>0, group=>$assignment->groups->{$user->id}, files=>[])
         if submitted() ne SUBMITTED_YES and not @dates;
       push @rows, @dates if submitted() ne SUBMITTED_NO;
     }
@@ -273,10 +273,7 @@ sub main_view {
         my @url = (ASSIGNMENTS, $r->assignment->id, USERS, $r->user->id,
                    START_DATE(), $r->date, END_DATE(), $r->date,
                    SHOW_FAILED(), $r->failed);
-        my @file_rows = @{$r->files} ?
-          map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
-                "<span class='bytes'>".$_->size."</span>"] } @{$r->files} : ["(No files)", ""];
-        my $num_files = @file_rows;
+        my $num_files = @{$r->files} || 1;
         my @new_cells =
           ($r->assignment->id, $r->assignment->title,
            join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
@@ -284,35 +281,32 @@ sub main_view {
            ($r->date ?
             (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
                   pretty_date($r->date) . ' [' . $r->user->id . ']') .
-             ($r->late ? " (Late)" : "") .
-             ($r->failed ? " - FAILED" : "")) :
+             ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
             ("(Nothing submitted)")));
         my $i = firstidx {not $_->[0] or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
  
-        say "<tr><td colspan='$i' rowspan='$num_files'></td>" if $i;
-        say "<td style='border-top:solid 1px black;' rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
+        say "<tr><td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
+        say "<td rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
 
-        for my $j (0..$#file_rows) {
-          say $j == 0 ? "<td style='border-top:solid 1px black;'>" : "<td>";
-          say $file_rows[$j]->[0], "</td>";
-          say $j == 0 ? "<td style='border-top:solid 1px black;'>" : "<td>";
-          say $file_rows[$j]->[1], "</td></tr>";
-          say "<tr>";
-        }
+        my @file_rows = @{$r->files} ?
+          map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name),
+                     $_->name), $_->size] } @{$r->files} : ["(No files)", ""];
+        say join("</tr><tr>", map {$q->td({-class=>'file'}, $_)} @file_rows);
+
         say "</tr>";
         @cells = @new_cells;
 
         if ($r->date and (reports() or guards())) {
           my @programs = ((guards() ? @{$r->assignment->guards} : ()),
                           (reports() ? @{$r->assignment->reports} : ()));
-          say '<tr><td colspan=2></td>';
-          say '<td colspan=6 style="background:rgb(95%,95%,95%);">';
+          say '<tr><td class="indent" colspan=2></td>';
+          say '<td colspan=6 class="indent" style="background:rgb(95%,95%,95%);">';
           say 'Submission ', ($r->failed ? 'FAILED' : 'succeeded');
           say ' and is ', ($r->late ? 'LATE' : 'on time'), '.';
           say '</td></tr>';
           set_env($r->assignment, $r->user, $r->date);
           for my $program (@programs) {
-            say "<tr><td></td><td colspan=7><div>";
+            say "<tr><td class='indent' colspan=2></td><td class='indent' colspan=6><div>";
             warn "Running guard or report: $program";
             system $program;
             warn "Exit code: $?";
@@ -365,12 +359,19 @@ sub pre_body {
   .search { width:100%; }
   .search select { width:100%; }
   .search input[type="text"] { width:90%; }
-  .results { width:100%;border-collapse: collapse; }
-  .results>thead { border-bottom:2px solid black; }
-  .results>tbody { border-bottom:1px solid black; }
-  .results>.bytes { text-align:right; }
-/*  .results>tbody>TR+TR>td+td { text-align:right; }*/
-/*  .results>tbody>TR+TR>td+td[colspan] { text-align:left; }*/
+  .file+.file { text-align:right; }
+
+  .results { width:100%; border-spacing: 0px; border-bottom:1px solid black; }
+  .results>thead>TR>th { border-bottom:1px solid black; }
+
+  .results>tbody>TR>td { border-top:solid 1px black; }
+  .results>tbody>TR>td.indent { border-top: none; }
+
+  .results>tbody>TR>td.file { border-top: none; }
+  .results>tbody>TR>td+td.file { border-top:solid 1px black; }
+  .results>tbody>TR>td.file+td.file { border-top:none; }
+  .results>tbody>TR>td+td.file+td.file { border-top:solid 1px black; }
+
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
   .body { margin-left:21em; }
   .footer { clear:left; text-align:right; font-size: small; }
