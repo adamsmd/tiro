@@ -195,21 +195,23 @@ sub upload {
 sub main_view {
   my @rows;
   for my $assignment (@assignments) {
-    # TODO: if include group members
     my @shown_users = @users ? @users : @all_users;
+    warn "SHOWN:", map {$_->id} @shown_users;
     @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
       unless $login->is_admin;
-#    @shown_users = map {@{$assignment->groups->{$_->id}}} @shown_users
-#      if show_group();
     for my $user (@shown_users) {
-      my @dates = list_submissions($assignment, (show_group() ? @{$assignment->groups->{$user->id}} : ($user)));
+      warn "USER:", $user->id;
+      my @dates = list_submissions(
+        $assignment, show_group() ? @{$assignment->groups->{$user->id}} : ($user));
       @dates = grep {start_date() le $_->date} @dates if start_date();
       @dates = grep {end_date() ge $_->date} @dates if end_date();
       @dates = grep {not $_->failed} @dates if not show_failed();
       @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
 
-      push @rows, Submission->new(assignment=>$assignment, user=>empty_user(), date=>'', late=>0,
-                           group=>$assignment->groups->{$user->id}, files=>[])
+      warn $#dates;
+      push @rows, Submission->new(
+        assignment=>$assignment, user=>@{$assignment->groups->{$user->id}}[0], date=>'', late=>0,
+        group=>$assignment->groups->{$user->id}, files=>[])
         if submitted() ne SUBMITTED_YES and not @dates;
       push @rows, @dates if submitted() ne SUBMITTED_NO;
     }
@@ -268,7 +270,6 @@ sub main_view {
     } else {
       my @cells = ();
       for my $r (@rows) {
-        #say $q->start_tbody();
         my @url = (ASSIGNMENTS, $r->assignment->id, USERS, $r->user->id,
                    START_DATE(), $r->date, END_DATE(), $r->date,
                    SHOW_FAILED(), $r->failed);
@@ -276,20 +277,20 @@ sub main_view {
           map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name), $_->name),
                 "<span class='bytes'>".$_->size."</span>"] } @{$r->files} : ["(No files)", ""];
         my $num_files = @file_rows;
-          my @new_cells = 
-            ($r->assignment->id, $r->assignment->title,
-             join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
-             join("; ",map {$_->full_name} @{$r->group}),
-             ($r->date ?
-              (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
-                    pretty_date($r->date) . ' [' . $r->user->id . ']') .
-               ($r->late ? " (Late)" : "") .
-               ($r->failed ? " - FAILED" : "")) :
-              ("(Nothing submitted)", "")));
-          my $i = firstidx {$_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
+        my @new_cells =
+          ($r->assignment->id, $r->assignment->title,
+           join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
+           join("; ",map {$_->full_name} @{$r->group}),
+           ($r->date ?
+            (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
+                  pretty_date($r->date) . ' [' . $r->user->id . ']') .
+             ($r->late ? " (Late)" : "") .
+             ($r->failed ? " - FAILED" : "")) :
+            ("(Nothing submitted)")));
+        my $i = firstidx {not $_->[0] or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
  
-          say "<tr><td colspan='$i' rowspan='$num_files'></td>" if $i;
-          say "<td style='border-top:solid 1px black;' rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
+        say "<tr><td colspan='$i' rowspan='$num_files'></td>" if $i;
+        say "<td style='border-top:solid 1px black;' rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
 
         for my $j (0..$#file_rows) {
           say $j == 0 ? "<td style='border-top:solid 1px black;'>" : "<td>";
@@ -298,14 +299,14 @@ sub main_view {
           say $file_rows[$j]->[1], "</td></tr>";
           say "<tr>";
         }
-          say "</tr>";
-          @cells = @new_cells;
+        say "</tr>";
+        @cells = @new_cells;
 
         if ($r->date and (reports() or guards())) {
           my @programs = ((guards() ? @{$r->assignment->guards} : ()),
                           (reports() ? @{$r->assignment->reports} : ()));
-          say '<tr><td></td>';
-          say '<td colspan=7 style="background:rgb(95%,95%,95%);">';
+          say '<tr><td colspan=2></td>';
+          say '<td colspan=6 style="background:rgb(95%,95%,95%);">';
           say 'Submission ', ($r->failed ? 'FAILED' : 'succeeded');
           say ' and is ', ($r->late ? 'LATE' : 'on time'), '.';
           say '</td></tr>';
@@ -318,7 +319,6 @@ sub main_view {
             say "</div></td></tr>";
           }
         }
-        #say $q->end_tbody();
       }
     }
     say $q->end_table();
