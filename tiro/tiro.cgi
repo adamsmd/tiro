@@ -26,10 +26,6 @@ use Date::Manip;
 use File::Slurp qw/slurp/; # Perl 6 feature
 use List::MoreUtils qw/:all/;
 
-################
-# Structs
-################
-
 struct UploadFile=>{name=>'$', handle=>'$'};
 
 ################
@@ -87,7 +83,7 @@ define_param(
 use constant {
   SUBMITTED_YES=>"sub_yes", SUBMITTED_NO=>"sub_no", SUBMITTED_ANY=>"sub_any",
   SORT_ASSIGNMENT=>'sort_assignment', SORT_USER=>'sort_user',
-  SORT_DATE=>'sort_date', SORT_FULL_NAME=>'sort_full_name'};
+  SORT_DATE=>'sort_date', SORT_NAME=>'sort_name' };
 
 # Login
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
@@ -192,11 +188,9 @@ sub main_view {
   my @rows;
   for my $assignment (@assignments) {
     my @shown_users = @users ? @users : @all_users;
-    warn "SHOWN:", map {$_->id} @shown_users;
     @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
       unless $login->is_admin;
     for my $user (@shown_users) {
-      warn "USER:", $user->id;
       my @dates = list_submissions(
         $config, $assignment, show_group() ? @{$assignment->groups->{$user->id}} : ($user));
       @dates = grep {start_date() le $_->date} @dates if start_date();
@@ -204,29 +198,22 @@ sub main_view {
       @dates = grep {not $_->failed} @dates if not show_failed();
       @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
 
-      warn $#dates;
-      push @rows, Submission->new(
-        assignment=>$assignment, user=>@{$assignment->groups->{$user->id}}[0],
-        date=>'', late=>0, group=>$assignment->groups->{$user->id}, files=>[])
+      push @rows, no_submissions($assignment, $user)
         if submitted() ne SUBMITTED_YES and not @dates;
       push @rows, @dates if submitted() ne SUBMITTED_NO;
     }
   }
   my %seen;
-  @rows = grep { ! $seen{$_->assignment->id.'\x00'.$_->user->id.'\x00'.$_->date}++} @rows;
-#  @rows = intersect(@rows, sub {$_->assignment, @rows);
+  @rows = grep { !$seen{$_->assignment->id."\x00".$_->user->id."\x00".$_->date}++} @rows;
+# TODO
 
-  @rows = sort {(sort_by() eq SORT_USER and
-                 join('\x00', map {$_->id} @{$a->group}) cmp
-                 join('\x00', map {$_->id} @{$b->group}))
-                  or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
-                  or (sort_by() eq SORT_FULL_NAME and
-                      join('\x00', map {$_->full_name} @{$a->group}) cmp
-                      join('\x00', map {$_->full_name} @{$b->group}))
-                  or ($a->assignment->id cmp $b->assignment->id)
-                  or (join('\x00', map {$_->id} @{$a->group}) cmp
-                      join('\x00', map {$_->id} @{$b->group}))
-                  or ($a->date cmp $b->date) } @rows;
+  @rows = sort {
+    (sort_by() eq SORT_USER and $a->group_id cmp $b->group_id)
+      or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
+      or (sort_by() eq SORT_NAME and $a->group_name cmp $b->group_name)
+      or ($a->assignment->id cmp $b->assignment->id)
+      or ($a->group_id cmp $b->group_id)
+      or ($a->date cmp $b->date) } @rows;
 
   pre_body();
 
@@ -257,7 +244,7 @@ sub main_view {
 
   if (show_results()) {
     say $q->start_table({-class=>'results'});
-    say $q->thead($q->Tr($q->th(["#", "Title", "User"," Name",
+    say $q->thead($q->Tr($q->th(["#", "Title", "User", "Name",
                                  "Reports", "Files", "Bytes"])));
     if (not @rows) {
       say row(7, $q->center('No results to display.',
@@ -272,14 +259,16 @@ sub main_view {
         my @new_cells = (
           $r->assignment->id, $r->assignment->title,
           join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
-          join("; ",map {$_->full_name} @{$r->group}),
+          join("; ",map {$_->name} @{$r->group}),
           ($r->date ?
            (href(url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
                  pretty_date($r->date) . ' [' . $r->user->id . ']') .
             ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
            ("(Nothing submitted)")));
-        warn join(':', map {defined $_} @cells);
-        my $i = firstidx {(not defined $_->[0]) or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
+
+        my ($i) = firstidx {$_} pairwise {(not defined $a) or $a ne $b} @cells, @new_cells;
+#        my $i = firstidx {(not defined $_->[0]) or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
+# TODO
  
         say "<tr><td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
         say "<td rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
@@ -443,8 +432,8 @@ EOT
                         [SUBMITTED_NO, "Unsubmitted"])],
       ["Sort by:", radio(SORT_BY(),
                          [SORT_ASSIGNMENT, "Assignment"],
-                         [SORT_USER, "User"],
-                         [SORT_FULL_NAME, "Full Name"],
+                         [SORT_USER, "User ID"],
+                         [SORT_NAME, "User Name"],
                          [SORT_DATE, "Date"])],
       ["", $q->submit(-value=>"Search")]);
     say $q->end_table();

@@ -15,59 +15,6 @@ use Date::Manip;
 use File::Slurp qw/slurp/; # Perl 6 feature
 use List::MoreUtils qw/:all/;
 
-struct Submission=>{assignment=>'AssignmentConfig', user=>'UserConfig',
-                    group=>'@', date=>'$', files=>'@', failed=>'$', late=>'$'};
-struct File=>{name=>'$', size=>'$'};
-
-
-sub list_assignments {
-  my ($config, $user_hash, @users) = @_;
-  map { my $path = $_;
-        my ($id) = $_ =~ $config->assignments_regex;
-        if (not defined $id) { (); }
-        else {
-          my $assignment = parse_assignment_file($user_hash,
-            catfile($config->assignments_dir, $path));
-          $assignment->id($id);
-          $assignment->path($path);
-          $assignment->dates([
-            map { $_ ? $_ : () }
-            map {
-              firstval {not $_->failed}
-              sort {$a->date cmp $b->date}
-              list_submissions($config, $assignment, @{$assignment->groups->{$_->id}})
-            } @users]);
-          $assignment;
-        }
-  } dir_list($config->assignments_dir);
-}
-
-sub list_submissions {
-  my ($config, $assignment, @users) = @_;
-
-  sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
-  grep {-d catfile($config->submissions_dir, $_->assignment->id, $_->user->id, $_->date.$_->failed)}
-  map { my $user = $_;
-        map { $_ =~ /^(.*?)((\.tmp)?)$/;
-              Submission->new(
-                assignment=>$assignment, user=>$user, date=>date($1),
-                group=>$assignment->groups->{$user->id},
-                failed=>$2, files=>[list_files($config, $assignment, $user, $1.$2)],
-                late=>($1 gt late_after($assignment)), failed=>$2 ne '');
-        } dir_list($config->submissions_dir,$assignment->id,$user->id)
-  } @users;
-}
-
-sub list_files {
-  my ($config, $assignment, $user, $date) = @_;
-  my @names = dir_list($config->submissions_dir,
-                       $assignment->id, $user->id, $date);
-  map { File->new(name=>$_, size=>-s catfile($config->submissions_dir,
-                    $assignment->id, $user->id, $date, $_)) } @names;
-}
-
-sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
-
 =head1 NAME
 
 Tiro - The great new Tiro.pm!
@@ -79,7 +26,6 @@ Version 0.02
 =cut
 
 our $VERSION = '0.02';
-
 
 =head1 SYNOPSIS
 
@@ -102,7 +48,7 @@ if you don't export anything, such as for a purely object-oriented module.
 our @EXPORT = qw(
   parse_global_config_file parse_assignment_file parse_user_configs
   list_assignments list_submissions dir_list
-  GlobalConfig UserConfig AssignmentConfig empty_user);
+  GlobalConfig UserConfig AssignmentConfig no_submissions);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -139,11 +85,17 @@ struct GlobalConfig=>{
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$',
   text=>'$', misc=>'%' };
-struct UserConfig=>{id=>'$', full_name=>'$', is_admin=>'$'};
+struct UserConfig=>{id=>'$', name=>'$', is_admin=>'$'};
 struct AssignmentConfig=>{
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
   guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
+
+struct Submission=>{
+  assignment=>'AssignmentConfig', user=>'UserConfig',
+  group=>'@', group_id=>'$', group_name=>'$',
+  date=>'$', files=>'@', failed=>'$', late=>'$'};
+struct File=>{name=>'$', size=>'$'};
 
 =head2 parse_global_config_file
 
@@ -161,7 +113,7 @@ sub parse_global_config_file {
     my @admins = (@{$config{'admins'} || []}, @{$c{'admins'}});
     my %users = (%{$config{'users'} || {}},
                  map { my ($id, $name) = quotewords(qr/\s+/, 0, $_);
-                       ($id, { full_name => $name }) }
+                       ($id, { name => $name }) }
                  @{$c{'users'}});
 
     %config = (%config, %c, admins => \@admins, users => \%users);
@@ -189,12 +141,34 @@ sub parse_assignment_file {
   $file{'groups'}->{$_} = [$_] for (keys %$users);
   for my $group (@groups) {
     push @{$file{'groups'}->{$_}}, @$group for (@$group);
-
   }
   $file{'groups'}->{$_} = [map {$users->{$_}} (sort (uniq(@{$file{'groups'}->{$_}})))]
     for (keys %$users);
 
   return AssignmentConfig->new(%file, misc=>\%file);
+}
+
+
+sub list_assignments {
+  my ($config, $user_hash, @users) = @_;
+  map { my $path = $_;
+        my ($id) = $_ =~ $config->assignments_regex;
+        if (not defined $id) { (); }
+        else {
+          my $assignment = parse_assignment_file($user_hash,
+            catfile($config->assignments_dir, $path));
+          $assignment->id($id);
+          $assignment->path($path);
+          $assignment->dates([
+            map { $_ ? $_ : () }
+            map {
+              firstval {not $_->failed}
+              sort {$a->date cmp $b->date}
+              list_submissions($config, $assignment, @{$assignment->groups->{$_->id}})
+            } @users]);
+          $assignment;
+        }
+  } dir_list($config->assignments_dir);
 }
 
 =head2 parse_user_configs
@@ -209,29 +183,60 @@ sub parse_user_configs {
   my %users = %{$global_config->users};
 
   for my $file (@{$global_config->user_files}) {
-    my ($header_lines, $id_col, $full_name_col, $file_name) =
+    my ($header_lines, $id_col, $name_col, $file_name) =
       quotewords(qr/\s+/, 0, $file);
-    warn "H:$header_lines, $id_col, $full_name_col, $file_name";
 
     for (drop($header_lines || 0, split("\n", slurp $file_name))) {
       my @words = quotewords(",", 0, $_);
       my $id = $words[$id_col];
-      my $full_name = $words[$full_name_col];
-      if (defined $id and defined $full_name) {
-        $users{$id} = { full_name => $full_name };
-      }
+      my $name = $words[$name_col];
+      $users{$id} = { name => $name } if defined $id and defined $name;
     }
   }
 
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
-  warn join(':', keys %users);
-
   return map { ($_, UserConfig->new(id => $_, %{$users{$_}})) } (keys %users);
 }
 
-sub empty_user { UserConfig->new(id => '', full_name => '', is_admin => '') }
+sub no_submissions {
+  my ($assignment, $user) = @_;
+  my $group = $assignment->groups->{$user->id};
+  Submission->new(
+    assignment=>$assignment, user=>@{$assignment->groups->{$user->id}}[0],
+    date=>'', late=>0, group=>$group, files=>[],
+    group_id=>join("\x00", map {$_->id} @$group),
+    group_name=>join("\x00", map {$_->name} @$group));
+}
+
+sub list_submissions {
+  my ($config, $assignment, @users) = @_;
+
+  sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
+  grep {-d catfile($config->submissions_dir, $_->assignment->id, $_->user->id,
+                   $_->date.$_->failed)}
+  map { my $user = $_;
+        map { $_ =~ /^(.*?)((\.tmp)?)$/;
+              my $group = $assignment->groups->{$user->id};
+              Submission->new(
+                assignment=>$assignment, user=>$user, date=>date($1),
+                group=>$group,
+                group_id=>join("\x00", map {$_->id} @$group),
+                group_name=>join("\x00", map {$_->name} @$group),
+                failed=>$2, files=>[list_files($config, $assignment, $user, $1.$2)],
+                late=>($1 gt late_after($assignment)), failed=>$2 ne '');
+        } dir_list($config->submissions_dir,$assignment->id,$user->id)
+  } @users;
+}
+
+sub list_files {
+  my ($config, $assignment, $user, $date) = @_;
+  my @names = dir_list($config->submissions_dir,
+                       $assignment->id, $user->id, $date);
+  map { File->new(name=>$_, size=>-s catfile($config->submissions_dir,
+                    $assignment->id, $user->id, $date, $_)) } @names;
+}
 
 =head2 parse_config_file
 
@@ -264,11 +269,11 @@ Michael D. Adams, C<< <www.cs.indiana.edu/~adamsmd/> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-tiro-config at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Tiro-Config>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
-
-
+Please report any bugs or feature requests to C<bug-tiro-config at rt.cpan.org>,
+or through the web interface at
+L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Tiro-Config>.  I will
+be notified, and then you'll automatically be notified of progress on
+your bug as I make changes.
 
 
 =head1 SUPPORT
@@ -276,7 +281,6 @@ automatically be notified of progress on your bug as I make changes.
 You can find documentation for this module with the perldoc command.
 
     perldoc Tiro::Config
-
 
 You can also look for information at:
 
@@ -317,12 +321,13 @@ See http://dev.perl.org/licenses/ for more information.
 
 =cut
 
+sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
+
 sub dir_list {
   opendir(my $d, catdir(@_)) or return ();
   my @ds = readdir($d);
   closedir $d;
   return sort grep {!/^\./} @ds; # skip dot files
 }
-
 
 1; # End of Tiro::Config
