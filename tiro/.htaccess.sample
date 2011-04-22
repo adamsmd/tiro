@@ -1,0 +1,8 @@
+SSLRequireSSL
+#SSLOptions +StrictRequire
+AuthType KerberosV5
+AuthName "Tiro Login"
+Require valid-user
+
+## Redirect non-https connections to https page
+ErrorDocument 403 https://example.com/cgi-pub/tiro/tiro.cgi
