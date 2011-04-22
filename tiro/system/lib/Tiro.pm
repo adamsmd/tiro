@@ -1,4 +1,4 @@
-package Tiro::Config;
+package Tiro;
 
 use warnings;
 use strict;
@@ -8,23 +8,77 @@ use Carp;
 use Class::Struct;
 use Exporter qw(import);
 use Text::ParseWords;
+use File::Spec::Functions;
 
 # Modules not from Core
 use Date::Manip;
 use File::Slurp qw/slurp/; # Perl 6 feature
 use List::MoreUtils qw/:all/;
 
+struct Submission=>{assignment=>'AssignmentConfig', user=>'UserConfig',
+                    group=>'@', date=>'$', files=>'@', failed=>'$', late=>'$'};
+struct File=>{name=>'$', size=>'$'};
+
+
+sub list_assignments {
+  my ($config, $user_hash, @users) = @_;
+  map { my $path = $_;
+        my ($id) = $_ =~ $config->assignments_regex;
+        if (not defined $id) { (); }
+        else {
+          my $assignment = parse_assignment_file($user_hash,
+            catfile($config->assignments_dir, $path));
+          $assignment->id($id);
+          $assignment->path($path);
+          $assignment->dates([
+            map { $_ ? $_ : () }
+            map {
+              firstval {not $_->failed}
+              sort {$a->date cmp $b->date}
+              list_submissions($config, $assignment, @{$assignment->groups->{$_->id}})
+            } @users]);
+          $assignment;
+        }
+  } dir_list($config->assignments_dir);
+}
+
+sub list_submissions {
+  my ($config, $assignment, @users) = @_;
+
+  sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
+  grep {-d catfile($config->submissions_dir, $_->assignment->id, $_->user->id, $_->date.$_->failed)}
+  map { my $user = $_;
+        map { $_ =~ /^(.*?)((\.tmp)?)$/;
+              Submission->new(
+                assignment=>$assignment, user=>$user, date=>date($1),
+                group=>$assignment->groups->{$user->id},
+                failed=>$2, files=>[list_files($config, $assignment, $user, $1.$2)],
+                late=>($1 gt late_after($assignment)), failed=>$2 ne '');
+        } dir_list($config->submissions_dir,$assignment->id,$user->id)
+  } @users;
+}
+
+sub list_files {
+  my ($config, $assignment, $user, $date) = @_;
+  my @names = dir_list($config->submissions_dir,
+                       $assignment->id, $user->id, $date);
+  map { File->new(name=>$_, size=>-s catfile($config->submissions_dir,
+                    $assignment->id, $user->id, $date, $_)) } @names;
+}
+
+sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
+
 =head1 NAME
 
-Tiro::Config - The great new Tiro::Config!
+Tiro - The great new Tiro.pm!
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 
 =head1 SYNOPSIS
@@ -47,6 +101,7 @@ if you don't export anything, such as for a purely object-oriented module.
 
 our @EXPORT = qw(
   parse_global_config_file parse_assignment_file parse_user_configs
+  list_assignments list_submissions dir_list
   GlobalConfig UserConfig AssignmentConfig empty_user);
 our @EXPORT_OK = qw();
 
@@ -127,7 +182,7 @@ sub parse_assignment_file {
 
   $file{$_} = date($file{$_}) for ('due', 'late_after', 'hidden_until');
   defined $file{$_} or $file{$_} = "" for (
-    'due', 'late_after', 'hidden_until', 'text_file', 'text', 'file_count');
+    'title', 'due', 'late_after', 'hidden_until', 'text_file', 'text', 'file_count');
 
   my @groups = map {[quotewords(qr/\s+/, 0, $_)]} @{$file{'groups'}};
   $file{'groups'} = {};
@@ -261,5 +316,13 @@ See http://dev.perl.org/licenses/ for more information.
 
 
 =cut
+
+sub dir_list {
+  opendir(my $d, catdir(@_)) or return ();
+  my @ds = readdir($d);
+  closedir $d;
+  return sort grep {!/^\./} @ds; # skip dot files
+}
+
 
 1; # End of Tiro::Config

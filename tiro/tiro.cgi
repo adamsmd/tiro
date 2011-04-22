@@ -21,7 +21,7 @@ use Time::HiRes qw(time);
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
 # Modules not from Core
-use Tiro::Config;
+use Tiro;
 use Date::Manip;
 use File::Slurp qw/slurp/; # Perl 6 feature
 use List::MoreUtils qw/:all/;
@@ -29,10 +29,6 @@ use List::MoreUtils qw/:all/;
 ################
 # Structs
 ################
-
-struct Submission=>{assignment=>'AssignmentConfig', user=>'UserConfig',
-                    group=>'@', date=>'$', files=>'@', failed=>'$', late=>'$'};
-struct File=>{name=>'$', size=>'$'};
 
 struct UploadFile=>{name=>'$', handle=>'$'};
 
@@ -107,7 +103,7 @@ if ($login->is_admin && user_override() ne "") {
 my @all_users = $login->is_admin ?
   sort {$a->id cmp $b->id} values %real_all_users : ($login);
 my @all_assignments = $login->is_admin ?
-  list_assignments() : grep { $_->hidden_until le $now } list_assignments();
+  list_assignments($config, \%real_all_users, @all_users) : grep { $_->hidden_until le $now } list_assignments($config, \%real_all_users, @all_users);
 
 # Other inputs
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
@@ -202,7 +198,7 @@ sub main_view {
     for my $user (@shown_users) {
       warn "USER:", $user->id;
       my @dates = list_submissions(
-        $assignment, show_group() ? @{$assignment->groups->{$user->id}} : ($user));
+        $config, $assignment, show_group() ? @{$assignment->groups->{$user->id}} : ($user));
       @dates = grep {start_date() le $_->date} @dates if start_date();
       @dates = grep {end_date() ge $_->date} @dates if end_date();
       @dates = grep {not $_->failed} @dates if not show_failed();
@@ -283,7 +279,8 @@ sub main_view {
                   pretty_date($r->date) . ' [' . $r->user->id . ']') .
              ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
             ("(Nothing submitted)")));
-        my $i = firstidx {not $_->[0] or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
+        warn join(':', map {defined $_} @cells);
+        my $i = firstidx {(not defined $_->[0]) or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
  
         say "<tr><td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
         say "<td rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
@@ -500,51 +497,6 @@ sub set_env {
 
 sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 
-sub list_assignments {
-  map { my $path = $_;
-        my ($id) = $_ =~ $config->assignments_regex;
-        if (not defined $id) { (); }
-        else {
-          my $assignment = parse_assignment_file(\%real_all_users,
-            catfile($config->assignments_dir, $path));
-          $assignment->id($id);
-          $assignment->path($path);
-          $assignment->dates([
-            map { $_ ? $_ : () }
-            map {
-              firstval {not $_->failed}
-              sort {$a->date cmp $b->date}
-              list_submissions($assignment, @{$assignment->groups->{$_->id}})
-            } @all_users]);
-          $assignment;
-        }
-  } dir_list($config->assignments_dir);
-}
-
-sub list_submissions {
-  my ($assignment, @users) = @_;
-
-  sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
-  grep {-d filename($_->assignment->id, $_->user->id, $_->date.$_->failed)}
-  map { my $user = $_;
-        map { $_ =~ /^(.*?)((\.tmp)?)$/;
-              Submission->new(
-                assignment=>$assignment, user=>$user, date=>date($1),
-                group=>$assignment->groups->{$user->id},
-                failed=>$2, files=>[list_files($assignment, $user, $1.$2)],
-                late=>($1 gt late_after($assignment)), failed=>$2 ne '');
-        } dir_list($config->submissions_dir,$assignment->id,$user->id)
-  } @users;
-}
-
-sub list_files {
-  my ($assignment, $user, $date) = @_;
-  my @names = dir_list($config->submissions_dir,
-                       $assignment->id, $user->id, $date);
-  map { File->new(name=>$_, size=>-s filename(
-                    $assignment->id, $user->id, $date, $_)) } @names;
-}
-
 sub filename { catfile($config->submissions_dir, @_); }
 
 ################
@@ -599,11 +551,4 @@ sub select_by_id {
   my ($list1, @list2) = @_;
   my %a = map {($_,1)} @list2;
   sort {$a->id cmp $b->id} grep {$a{$_->id}} @{$list1}
-}
-
-sub dir_list {
-  opendir(my $d, catdir(@_)) or return ();
-  my @ds = readdir($d);
-  closedir $d;
-  return sort grep {!/^\./} @ds; # skip dot files
 }
