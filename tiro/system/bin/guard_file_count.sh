@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# USAGE: ./tiro/system/bin/guard_file_count.sh <MIN COUNT> <MAX COUNT>
+# USAGE: ./system/bin/guard_file_count.sh <MIN COUNT> <MAX COUNT>
 
 LOW="$1"
 HIGH="$2"

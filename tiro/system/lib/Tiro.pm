@@ -224,8 +224,8 @@ sub list_submissions {
                 group=>$group,
                 group_id=>join("\x00", map {$_->id} @$group),
                 group_name=>join("\x00", map {$_->name} @$group),
-                failed=>$2, files=>[list_files($config, $assignment, $user, $1.$2)],
-                late=>($1 gt late_after($assignment)), failed=>$2 ne '');
+                failed=>$2, late=>($1 gt late_after($assignment)),
+                files=>[list_files($config, $assignment, $user, $1.$2)]);
         } dir_list($config->submissions_dir,$assignment->id,$user->id)
   } @users;
 }

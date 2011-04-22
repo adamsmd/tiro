@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# USAGE: ./tiro/system/bin/guard_file_name.sh <PERL_REGEX> <FAIL MESSAGE>
+# USAGE: ./system/bin/guard_file_name.sh <PERL_REGEX> <FAIL MESSAGE>
 
 REGEX="$1"
 MESSAGE="$2"
