@@ -183,9 +183,9 @@ sub upload {
     error("Can't move TODO: $!");
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
-      -uri=>form_url(SHOW_RESULTS(), 1, REPORTS(), reports(),
-                     ASSIGNMENTS, $assignment->id, USERS, $login->id,
-                     START_DATE(), $now, END_DATE(), $now));
+      -uri=>url(SHOW_RESULTS(), 1, REPORTS(), reports(),
+                ASSIGNMENTS, $assignment->id, USERS, $login->id,
+                START_DATE(), $now, END_DATE(), $now));
 }
 
 sub main_view {
@@ -235,8 +235,7 @@ sub main_view {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($a->id . ": ", $a->title);
       say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
-      say $q->div(scalar(slurp(catfile($config->assignments_dir,
-                                       $a->text_file))))
+      say $q->div(scalar(slurp(catfile($config->assignments_dir,                                       $a->text_file))))
         unless $a->text_file eq "";
       say $q->div($a->text) unless $a->text eq "";
 
@@ -270,15 +269,15 @@ sub main_view {
                    START_DATE(), $r->date, END_DATE(), $r->date,
                    SHOW_FAILED(), $r->failed);
         my $num_files = @{$r->files} || 1;
-        my @new_cells =
-          ($r->assignment->id, $r->assignment->title,
-           join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
-           join("; ",map {$_->full_name} @{$r->group}),
-           ($r->date ?
-            (href(form_url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
-                  pretty_date($r->date) . ' [' . $r->user->id . ']') .
-             ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
-            ("(Nothing submitted)")));
+        my @new_cells = (
+          $r->assignment->id, $r->assignment->title,
+          join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
+          join("; ",map {$_->full_name} @{$r->group}),
+          ($r->date ?
+           (href(url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
+                 pretty_date($r->date) . ' [' . $r->user->id . ']') .
+            ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
+           ("(Nothing submitted)")));
         warn join(':', map {defined $_} @cells);
         my $i = firstidx {(not defined $_->[0]) or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
  
@@ -286,8 +285,8 @@ sub main_view {
         say "<td rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
 
         my @file_rows = @{$r->files} ?
-          map {[href(form_url(@url,DO_DOWNLOAD(),1,FILE,$_->name),
-                     $_->name), $_->size] } @{$r->files} : ["(No files)", ""];
+          map {[href(url(@url, DO_DOWNLOAD(), 1, FILE, $_->name), $_->name),
+                $_->size] } @{$r->files} : ["(No files)", ""];
         say join("</tr><tr>", map {$q->td({-class=>'file'}, $_)} @file_rows);
 
         say "</tr>";
@@ -326,19 +325,17 @@ sub main_view {
 sub warn_at_line { my $x = (caller(1))[2]; warn @_, " at line $x.\n"; $x }
 
 sub panic { # Prints error without navigation components
-  my $line = warn_at_line(@_);
   print $q->header();
   say $q->start_html(-title=>"Error: " . $config->title);
   say $q->h1("Error: " . $config->title);
-  say $q->p([@_, "(At line $line and time " . date("now") . ".)"]);
+  say $q->p([@_, "(At line ".warn_at_line(@_)." and time ".date("now").".)"]);
   exit 0;
 }
 
 sub error { # Prints error with navigation components
-  my $line = warn_at_line(@_);
   pre_body();
   say $q->h1({-style=>"color:red;"}, ["Error: ", @_]);
-  say $q->p("(At line $line and time $now.)");
+  say $q->p("(At line " . warn_at_line(@_) . " and time $now.)");
   post_body();
 }
 
@@ -403,9 +400,8 @@ EOT
     my $num_users = keys %real_all_users;
     my $late = (late_after($a) ne "" and $now ge late_after($a) and
                 not any {$_->date le late_after($a)} @{$a->dates});
-    say row(1, href(form_url(SHOW_SUBMIT_FORM(), 1, SHOW_GROUP(), 1,
-                             SHOW_RESULTS(), 1,
-                             ASSIGNMENTS, $a->id), $a->id . ": ", $a->title),
+    say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1, SHOW_RESULTS(), 1,
+                        SHOW_SUBMIT_FORM(), 1), $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
             ($login->is_admin ? $q->small("&nbsp;($num_done/$num_users)"):"") .
             ($late ? "&nbsp;Late" : ""));
@@ -418,9 +414,9 @@ EOT
   say row(1, "(No assignments yet)") unless @all_assignments;
   say $q->end_table();
 
-  say $q->h3("... or", href(form_url(), "Start Over"));
+  say $q->h3("... or", href(url(), "Start Over"));
 
-  say $q->h3("... or", href(form_url(SHOW_SEARCH_FORM(), 1), "Search"));
+  say $q->h3("... or", href(url(SHOW_SEARCH_FORM(), 1), "Search"));
   if (show_search_form()) {
     say $q->start_form(-action=>'#', -method=>'GET');
     say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
@@ -441,11 +437,11 @@ EOT
       ["<b>Advanced</b>", ""],
       ["Start date:", $q->textfield(-name=>START_DATE(), -value=>'Any')],
       ["End date:", $q->textfield(-name=>END_DATE(), -value=>'Any')],
-      ["Status:", radio(SUBMITTED(), 0,
+      ["Status:", radio(SUBMITTED(),
                         [SUBMITTED_ANY, "Any"],
                         [SUBMITTED_YES, "Submitted"],
                         [SUBMITTED_NO, "Unsubmitted"])],
-      ["Sort by:", radio(SORT_BY(), 0,
+      ["Sort by:", radio(SORT_BY(),
                          [SORT_ASSIGNMENT, "Assignment"],
                          [SORT_USER, "User"],
                          [SORT_FULL_NAME, "Full Name"],
@@ -461,11 +457,9 @@ EOT
 
 sub post_body {
   say $q->end_div();
-
-  say $q->p({-class=>'footer'}, "Completed in",
-            sprintf("%0.3f", time() - $start_time), "seconds by",
-            $q->a({-href=>'http://www.cs.indiana.edu/~adamsmd/projects/tiro/'},
-                  "Tiro") . ".");
+  printf("<p class='footer'>Completed in %0.3f seconds by " .
+         "<a href='http://www.cs.indiana.edu/~adamsmd/projects/tiro/'>" .
+         "Tiro</a>.\n", time() - $start_time);
   say $q->end_html();
   exit 0;
 }
@@ -499,56 +493,45 @@ sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 
 sub filename { catfile($config->submissions_dir, @_); }
 
-################
-# HTML Utils
-################
-
-sub define_param {
-  my (%hash) = @_;
-  for my $key (keys %hash) {
-    no strict 'refs';
-    my $val = $hash{$key}->($q->param($key));
-    *$key = sub () { $val; };
-    *{uc $key} = sub () { $key; };
-  }
-}
-
-sub form_url {
-  my %args = @_;
-  $args{USER_OVERRIDE()} = user_override() if $real_login->id ne $login->id;
-  return "?" . join "&", map {"$_=$args{$_}"} keys %args;
-}
-
-sub pretty_date { UnixDate($_[0], $config->date_format) }
-
-sub href { my ($href, @rest) = @_; $q->a({-href=>$href}, @rest); }
-
-sub multilist {
-  $q->scrolling_list(-name=>$_[0], -multiple=>1, -size=>5,
-                     -values=>[@_[1..$#_]], -default=>[@_[1..$#_]]);
-}
-
-sub radio {
-  my ($name, $def, @rest) = @_;
-  scalar($q->radio_group(-columns=>1, -name=>$name, -default=>$rest[$def][0],
-                         -values=>[map { $_->[0] } @rest],
-                         -labels=>{map { @$_ } @rest}));
-}
-
-sub row { $q->Tr($q->td({-colspan=>$_[0]}, [@_[1..$#_]])) }
-
-sub multirow {
-  my ($prefix, @rows) = @_;
-  "<tr>" . $q->td({-rowspan=>scalar(@rows)}, $prefix) .
-    join("</tr><tr>", (map { $q->td($_) } @rows)) . "</tr>";
-}
-
-################
-# General Utils
-################
-
 sub select_by_id {
   my ($list1, @list2) = @_;
   my %a = map {($_,1)} @list2;
   sort {$a->id cmp $b->id} grep {$a{$_->id}} @{$list1}
 }
+
+################
+# HTML Utils
+################
+
+sub define_param { # define_param(fun_name => \&filter_fun, ...)
+  my (%hash) = @_;
+  for my $key (keys %hash) {
+    no strict 'refs';
+    *$key = sub () { $hash{$key}->($q->param($key)); };
+    *{uc $key} = sub () { $key; };
+  }
+}
+
+sub url { # url(cgi_key, cgi_value, ...)
+  my %args = @_;
+  $args{USER_OVERRIDE()} = user_override() if $real_login->id ne $login->id;
+  return "?" . join "&", map {"$_=$args{$_}"} keys %args;
+}
+
+sub multilist { # multilist(cgi_key, row1, row2, row3 ...)
+  my $name = shift;
+  $q->scrolling_list(
+    -name=>$name, -multiple=>1, -size=>5, -values=>[@_], -default=>[@_]);
+}
+
+sub radio { # radio(cgi_key, [value, label], [value, label], ...)
+  my $name = shift;
+  scalar($q->radio_group(-columns=>1, -name=>$name, -labels=>{map { @$_ } @_},
+                         -values=>[map { $_->[0] } @_]));
+}
+
+sub pretty_date { UnixDate($_[0], $config->date_format) }
+
+sub href { my $href = shift; $q->a({-href=>$href}, @_); }
+
+sub row { my $span = shift; $q->Tr($q->td({-colspan=>$span}, [@_])); }
