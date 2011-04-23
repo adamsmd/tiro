@@ -26,13 +26,12 @@ use Date::Manip;
 use File::Slurp qw/slurp/; # Perl 6 feature
 use List::MoreUtils qw/:all/;
 
-struct UploadFile=>{name=>'$', handle=>'$'};
-
 ################
 # Bootstrap
 ################
 
-my $start_time = time();
+my $start_time = time(); # For measuring how long Tiro runs
+my $now = tiro_date "now"; # When Tiro started (e.g. submission date)
 
 set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})"); # Warning Prefix
 
@@ -69,11 +68,10 @@ sub keyword { (($_[0] or "") =~ m[^([A-Za-z0-9_\.-]*)$])[0]; }
 sub bool { $_[0] ? 1 : 0; }
 
 # Basic Inputs
-my $now = tiro_date "now";
 define_param(
   do_download => \&bool, do_submit => \&bool,
-  show_search_form => \&bool, show_submit_form => \&bool,
-  show_results => \&bool, show_failed => \&bool, show_group => \&bool,
+  show_search_form => \&bool, show_assignments => \&bool,
+  show_submissions => \&bool, show_failed => \&bool, show_group => \&bool,
   start_date => \&tiro_date, end_date => \&tiro_date, only_latest => \&bool,
   reports => \&bool, guards => \&bool, submitted => \&keyword,
   sort_by => \&keyword, user_override => \&keyword);
@@ -109,14 +107,11 @@ my @assignments = select_by_id(
   \@all_assignments, map { file $_ } $q->param(ASSIGNMENTS));
 
 my $download = file $q->param(FILE);
+struct UploadFile=>{name=>'$', handle=>'$'};
 my @upload_files =
   map {UploadFile->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
 
 $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
-sub same_group {
-  my ($assignment, $user1, $user2) = @_;
-  (grep {$user2->id eq $_->id} @{$assignment->groups->{$user1->id}}) ? 1 : 0;
-}
 
 ################
 # Main Code
@@ -179,7 +174,7 @@ sub upload {
     error("Can't move TODO: $!");
   print $q->redirect(
       -status=>303, # HTTP_SEE_OTHER
-      -uri=>url(SHOW_RESULTS(), 1, REPORTS(), reports(),
+      -uri=>url(SHOW_SUBMISSIONS(), 1, REPORTS(), reports(),
                 ASSIGNMENTS, $assignment->id, USERS, $login->id,
                 START_DATE(), $now, END_DATE(), $now));
 }
@@ -216,14 +211,15 @@ sub main_view {
 
   pre_body();
 
-  if (show_submit_form()) {
+  if (show_assignments()) {
+    say "<div class='assignments'>";
     for my $a (@assignments) {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($a->id . ": ", $a->title);
       say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
       say $q->div(scalar(slurp(catfile($tiro->assignments_dir,                                       $a->text_file))))
         unless $a->text_file eq "";
-      say $q->div($a->text) unless $a->text eq "";
+      say $q->div({-class=>'assignment_div'}, $a->text) unless $a->text eq "";
 
       if ($a->file_count ne "") {
         say $q->start_form(
@@ -239,14 +235,15 @@ sub main_view {
       say $q->p(); # Add extra space before the final line
       say $q->end_div();
     }
+    say "</div>";
   }
 
-  if (show_results()) {
-    say $q->start_table({-class=>'results'});
+  if (show_submissions()) {
+    say $q->start_table({-class=>'submissions'});
     say $q->thead($q->Tr($q->th(["#", "Title", "User", "Name",
                                  "Reports", "Files", "Bytes"])));
     if (not @rows) {
-      say row(7, $q->center('No results to display.',
+      say row(7, $q->center('No submissions to display.',
                             'Browse or search to select assignment.'));
     } else {
       my @cells = ();
@@ -260,7 +257,7 @@ sub main_view {
           join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
           join("; ",map {$_->name} @{$r->group}),
           ($r->date ?
-           (href(url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_RESULTS(), 1),
+           (href(url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_SUBMISSIONS(), 1),
                  pretty_date($r->date) . ' [' . $r->user->id . ']') .
             ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
            ("(Nothing submitted)")));
@@ -268,13 +265,14 @@ sub main_view {
         my ($i) = firstidx {$_} pairwise {(not defined $a) or $a ne $b} @cells, @new_cells;
 # TODO
  
-        say "<tr><td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
+        say "<tr class='submission'>";
+        say "<td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
         say "<td rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
 
         my @file_rows = @{$r->files} ?
           map {[href(url(@url, DO_DOWNLOAD(), 1, FILE, $_->name), $_->name),
                 $_->size] } @{$r->files} : ["(No files)", ""];
-        say join("</tr><tr>", map {$q->td({-class=>'file'}, $_)} @file_rows);
+        say join("</tr><tr class='submission_file'>", map {$q->td({-class=>'file'}, $_)} @file_rows);
 
         say "</tr>";
         @cells = @new_cells;
@@ -282,14 +280,14 @@ sub main_view {
         if ($r->date and (reports() or guards())) {
           my @programs = ((guards() ? @{$r->assignment->guards} : ()),
                           (reports() ? @{$r->assignment->reports} : ()));
-          say '<tr><td class="indent" colspan=2></td>';
+          say '<tr class="report_row"><td class="indent" colspan=2></td>';
           say '<td colspan=6 class="indent" style="background:rgb(95%,95%,95%);">';
           say 'Submission ', ($r->failed ? 'FAILED' : 'succeeded');
           say ' and is ', ($r->late ? 'LATE' : 'on time'), '.';
           say '</td></tr>';
           set_env($r->assignment, $r->user, $r->date);
           for my $program (@programs) {
-            say "<tr><td class='indent' colspan=2></td><td class='indent' colspan=6><div>";
+            say "<tr class='report_row'><td class='indent' colspan=2></td><td class='indent' colspan=6><div class='report_div'>";
             warn "Running guard or report: $program";
             system $program;
             warn "Exit code: $?";
@@ -301,7 +299,7 @@ sub main_view {
     say $q->end_table();
   }
 
-  say $tiro->text if not show_submit_form() and not show_results();
+  say $tiro->text if not show_assignments() and not show_submissions();
   post_body();
 }
 
@@ -312,8 +310,8 @@ sub main_view {
 sub warn_at_line { my $x = (caller(1))[2]; warn @_, " at line $x.\n"; $x }
 
 sub panic { # Prints error without navigation components
-  print $q->header();
-  say $q->start_html(-title=>"Error: " . $tiro->title);
+  print $q->header(-charset=>'utf8');
+  say $q->start_html(-title=>"Error: " . $tiro->title, -encoding=>'utf8');
   say $q->h1("Error: " . $tiro->title);
   say $q->p([@_, "(At line ".warn_at_line(@_)." and time ".tiro_date("now").".)"]);
   exit 0;
@@ -327,37 +325,41 @@ sub error { # Prints error with navigation components
 }
 
 sub pre_body {
-  print $q->header();
-  say $q->start_html(-title=>$tiro->title, -style=>{-verbatim=><<'EOT'});
+  print $q->header(-encoding=>'utf8');
+  
+  say $q->start_html(-title=>$tiro->title, -encoding=>'utf8',
+                     -style=>{-verbatim=><<'EOT'});
+
   th { vertical-align:top; text-align:left; }
-  td { vertical-align:top; }
+  td { vertical-align:top; text-align:left; }
   h2 { border-bottom:2px solid black; }
+
+  .welcome { float:right; font-weight:bold; }
   .navbar { padding:0.3em; width:19em; float:left; border:solid black 1px; }
+  .body { margin-left:21em; }
+  .footer { clear:left; text-align:right; font-size: small; }
+
   .navbar table { width:100%; }
   .navbar td { vertical-align: baseline; }
   .navbar form td { vertical-align: top; }
   .navbar>h3:first-child { margin-top:0; } /* Stop spurious margin */
-  .search { width:100%; }
-  .search select { width:100%; }
-  .search input[type="text"] { width:90%; }
-  .file+.file { text-align:right; }
-
-  .results { width:100%; border-spacing: 0px; border-bottom:1px solid black; }
-  .results>thead>TR>th { border-bottom:1px solid black; }
-
-  .results>tbody>TR>td { border-top:solid 1px black; }
-  .results>tbody>TR>td.indent { border-top: none; }
-
-  .results>tbody>TR>td.file { border-top: none; }
-  .results>tbody>TR>td+td.file { border-top:solid 1px black; }
-  .results>tbody>TR>td.file+td.file { border-top:none; }
-  .results>tbody>TR>td+td.file+td.file { border-top:solid 1px black; }
+  .navbar .search { width:100%; }
+  .navbar .search select { width:100%; }
+  .navbar .search input[type="text"] { width:90%; }
+  .navbar .hidden_until { color:red; }
 
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
-  .body { margin-left:21em; }
-  .footer { clear:left; text-align:right; font-size: small; }
-  .welcome { float:right; font-weight:bold; }
-  .hidden_until { color:red; }
+  .submissions { width:100%; border-spacing: 0px; border-bottom:1px solid black; }
+  .submissions>thead>TR>th { border-bottom:1px solid black; }
+
+  .submissions>tbody>TR>td { border-top:solid 1px black; }
+  .submissions>tbody>TR>td.indent { border-top: none; }
+
+  .submissions>tbody>TR>td.file { border-top: none; }
+  .submissions>tbody>TR>td+td.file { border-top:solid 1px black; }
+  .submissions>tbody>TR>td.file+td.file { border-top:none; text-align: right; }
+  .submissions>tbody>TR>td+td.file+td.file { border-top:solid 1px black; text-align: right; }
+
 EOT
 
   my $user_id = $login->id;
@@ -371,23 +373,23 @@ EOT
     }
   }
 
-  say $q->start_form(-action=>"?".$q->query_string, -method=>'GET');
   say $q->div({-class=>'welcome'},
-              "Welcome $user_id<br>Current time is", pretty_date($now));
-  say $q->end_form();
+              $q->start_form(-action=>"?".$q->query_string, -method=>'GET'),
+              "Welcome $user_id<br>Current time is", pretty_date($now),
+              $q->end_form());
 
-  say $q->h1($tiro->title);
+  say $q->div({-class=>'header'}, $q->h1($tiro->title));
 
   say $q->start_div({-class=>'navbar'});
 
   say $q->h3("Select Assignment");
-  say $q->start_table();
+  say $q->start_table({-class=>'assignment_table'});
   for my $a (@all_assignments) {
     my $num_done = @{$a->dates};
     my $num_users = keys %{$tiro->users()};
     my $late = ($a->late_if($now) and not any {not $_->late} @{$a->dates});
-    say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1, SHOW_RESULTS(), 1,
-                        SHOW_SUBMIT_FORM(), 1), $a->id . ": ", $a->title),
+    say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1, SHOW_SUBMISSIONS(), 1,
+                        SHOW_ASSIGNMENTS(), 1), $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
             ($login->is_admin ? $q->small("&nbsp;($num_done/$num_users)"):"") .
             ($late ? "&nbsp;Late" : ""));
@@ -404,17 +406,17 @@ EOT
 
   say $q->h3("... or", href(url(SHOW_SEARCH_FORM(), 1), "Search"));
   if (show_search_form()) {
-    say $q->start_form(-action=>'#', -method=>'GET');
+    say $q->start_form(-class=>'search_table', -action=>'#', -method=>'GET');
     say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
     say map {$q->hidden(-name=>$_, -default=>1)} (
-      SHOW_SEARCH_FORM(), SHOW_RESULTS(), SHOW_GROUP());
+      SHOW_SEARCH_FORM(), SHOW_SUBMISSIONS(), SHOW_GROUP());
     say $q->start_table({-class=>'search'});
     map { say row(1, @$_) } (
       ["User:", multilist(USERS, map {$_->id} @all_users)],
       ["Assignment:", multilist(ASSIGNMENTS, map {$_->id} @all_assignments)],
       ["Show:", join($q->br(), map {$q->checkbox($_->[0],$_->[1],'y',$_->[2])}
                      ([ONLY_LATEST(), only_latest(), 'Only Most Recent'],
-                      [SHOW_SUBMIT_FORM(), show_submit_form(), 'Submit Form'],
+                      [SHOW_ASSIGNMENTS(), show_assignments(), 'Submit Form'],
                       [REPORTS(), reports(), 'Reports'],
                       [GUARDS(), guards(), 'Guards'],
                       [SHOW_FAILED(), show_failed(), 'Failed Submissions']))],

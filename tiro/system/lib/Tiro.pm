@@ -45,7 +45,7 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =cut
 
-our @EXPORT = qw(dir_list tiro_date);
+our @EXPORT = qw(dir_list tiro_date same_group);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -62,6 +62,11 @@ sub dir_list {
 }
 
 sub tiro_date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
+
+sub same_group {
+  my ($assignment, $user1, $user2) = @_;
+  (grep {$user2->id eq $_->id} @{$assignment->groups->{$user1->id}}) ? 1 : 0;
+}
 
 struct 'Tiro::Tiro'=>{
   title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
