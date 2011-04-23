@@ -45,10 +45,7 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =cut
 
-our @EXPORT = qw(
-  parse_global_config_file parse_assignment_file parse_user_configs
-  list_assignments list_submissions dir_list
-  GlobalConfig UserConfig AssignmentConfig no_submissions);
+our @EXPORT = qw(dir_list tiro_date);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -57,54 +54,58 @@ our @EXPORT_OK = qw();
 
 =cut
 
-sub date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
+sub dir_list {
+  opendir(my $d, catdir(@_)) or return ();
+  my @ds = readdir($d);
+  closedir $d;
+  return sort grep {!/^\./} @ds; # skip dot files
+}
 
-# Configuration
-my %global_config_default = (
-  # General Configurations
-  title => '',
-  path => '/usr/local/bin:/usr/bin:/bin',
-  max_post_size => 1000000,
-  date_format => '%a, %b %d %Y, %r',
-  log_file => 'system/log/log-%Y-%m-%d.txt',
+sub tiro_date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 
-  # Assignment Configurations
-  assignments_dir => 'assignments',
-  assignments_regex => qr[^(\w+)\.cfg$],
-  submissions_dir => 'submissions',
-
-  # User Configurations
-  admins => [],
-  user_override => '',
-  users => {},
-  user_files=>[],
-  );
-
-struct GlobalConfig=>{
-  title=>'$', admins=>'*@', user_override=>'$', users=>'*%', user_files=>'@', 
+struct 'Tiro::GlobalConfig'=>{
+  title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$',
   text=>'$', misc=>'%' };
-struct UserConfig=>{id=>'$', name=>'$', is_admin=>'$'};
-struct AssignmentConfig=>{
+struct 'Tiro::User'=>{id=>'$', name=>'$', is_admin=>'$'};
+struct 'Tiro::Assignment'=>{
+  config=>'Tiro::GlobalConfig',
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
   guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
-
-struct Submission=>{
-  assignment=>'AssignmentConfig', user=>'UserConfig',
+struct 'Tiro::Submission'=>{
+  assignment=>'Tiro::Assignment', user=>'Tiro::User',
   group=>'@', group_id=>'$', group_name=>'$',
   date=>'$', files=>'@', failed=>'$', late=>'$'};
-struct File=>{name=>'$', size=>'$'};
+struct 'Tiro::File'=>{name=>'$', size=>'$'};
 
 =head2 parse_global_config_file
 
 =cut
 
-sub parse_global_config_file {
-  my ($file, @lists) = @_;
+sub Tiro::new {
+  my ($tiro, $file, @lists) = @_;
 
-  my %config = %global_config_default;
+  my %config = (
+    # General Configurations
+    title => '',
+    path => '/usr/local/bin:/usr/bin:/bin',
+    max_post_size => 1000000,
+    date_format => '%a, %b %d %Y, %r',
+    log_file => 'system/log/log-%Y-%m-%d.txt',
+
+    # Assignment Configurations
+    assignments_dir => 'assignments',
+    assignments_regex => qr[^(\w+)\.cfg$],
+    submissions_dir => 'submissions',
+
+    # User Configurations
+    admins => [],
+    user_override => '',
+    users => {},
+    user_files=>[],
+    );
 
   if (defined $file) {
     my %c = parse_config_file(
@@ -119,56 +120,53 @@ sub parse_global_config_file {
     %config = (%config, %c, admins => \@admins, users => \%users);
   }
 
-  return GlobalConfig->new(%config, misc=>\%config);
+  my $g = Tiro::GlobalConfig->new(%config, misc=>\%config);
+  $g->users({parse_user_configs($g)});
+  return $g;
 }
 
 =head2 parse_assignment_file
 
 =cut
 
-sub parse_assignment_file {
-  my ($users, $file, @lists) = @_;
+sub Tiro::GlobalConfig::assignment {
+  my ($config, $path, @users) = @_;
+
+  my ($id) = $_ =~ $config->assignments_regex;
+
+  defined $id or return ();
+
+  my @lists = ();
+  my $file = catfile($config->assignments_dir, $path);
 
   my %file = parse_config_file(
     $file, 'text', 'reports', 'guards', 'groups', @lists);
 
-  $file{$_} = date($file{$_}) for ('due', 'late_after', 'hidden_until');
+  $file{$_} = tiro_date($file{$_}) for ('due', 'late_after', 'hidden_until');
   defined $file{$_} or $file{$_} = "" for (
     'title', 'due', 'late_after', 'hidden_until', 'text_file', 'text', 'file_count');
 
   my @groups = map {[quotewords(qr/\s+/, 0, $_)]} @{$file{'groups'}};
   $file{'groups'} = {};
-  $file{'groups'}->{$_} = [$_] for (keys %$users);
+  $file{'groups'}->{$_} = [$_] for (keys %{$config->users()});
   for my $group (@groups) {
     push @{$file{'groups'}->{$_}}, @$group for (@$group);
   }
-  $file{'groups'}->{$_} = [map {$users->{$_}} (sort (uniq(@{$file{'groups'}->{$_}})))]
-    for (keys %$users);
+  $file{'groups'}->{$_} = [
+    map {$config->users()->{$_}} (sort (uniq(@{$file{'groups'}->{$_}})))]
+    for (keys %{$config->users()});
 
-  return AssignmentConfig->new(%file, misc=>\%file);
-}
-
-
-sub list_assignments {
-  my ($config, $user_hash, @users) = @_;
-  map { my $path = $_;
-        my ($id) = $_ =~ $config->assignments_regex;
-        if (not defined $id) { (); }
-        else {
-          my $assignment = parse_assignment_file($user_hash,
-            catfile($config->assignments_dir, $path));
-          $assignment->id($id);
-          $assignment->path($path);
-          $assignment->dates([
-            map { $_ ? $_ : () }
-            map {
-              firstval {not $_->failed}
-              sort {$a->date cmp $b->date}
-              list_submissions($config, $assignment, @{$assignment->groups->{$_->id}})
-            } @users]);
-          $assignment;
-        }
-  } dir_list($config->assignments_dir);
+  my $assignment = Tiro::Assignment->new(%file, config=>$config, misc=>\%file);
+  $assignment->id($id);
+  $assignment->path($path);
+  $assignment->dates([
+    map { $_ ? $_ : () }
+    map {
+      firstval {not $_->failed}
+      sort {$a->date cmp $b->date}
+      $assignment->submissions(@{$assignment->groups->{$_->id}})
+    } @users]);
+  return $assignment;
 }
 
 =head2 parse_user_configs
@@ -197,21 +195,23 @@ sub parse_user_configs {
   $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
-  return map { ($_, UserConfig->new(id => $_, %{$users{$_}})) } (keys %users);
+  return map { ($_, Tiro::User->new(id => $_, %{$users{$_}})) } (keys %users);
 }
 
-sub no_submissions {
+sub Tiro::Assignment::no_submissions {
   my ($assignment, $user) = @_;
   my $group = $assignment->groups->{$user->id};
-  Submission->new(
-    assignment=>$assignment, user=>@{$assignment->groups->{$user->id}}[0],
+  Tiro::Submission->new(
+    assignment=>$assignment, user=>$group->[0],
     date=>'', late=>0, group=>$group, files=>[],
     group_id=>join("\x00", map {$_->id} @$group),
     group_name=>join("\x00", map {$_->name} @$group));
 }
 
-sub list_submissions {
-  my ($config, $assignment, @users) = @_;
+sub Tiro::Assignment::submissions {
+  my ($assignment, $user, $group) = @_;
+  my @users = $group ? @{$assignment->groups->{$user->id}} : ($user);
+  my $config = $assignment->config();
 
   sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
   grep {-d catfile($config->submissions_dir, $_->assignment->id, $_->user->id,
@@ -219,8 +219,8 @@ sub list_submissions {
   map { my $user = $_;
         map { $_ =~ /^(.*?)((\.tmp)?)$/;
               my $group = $assignment->groups->{$user->id};
-              Submission->new(
-                assignment=>$assignment, user=>$user, date=>date($1),
+              Tiro::Submission->new(
+                assignment=>$assignment, user=>$user, date=>tiro_date($1),
                 group=>$group,
                 group_id=>join("\x00", map {$_->id} @$group),
                 group_name=>join("\x00", map {$_->name} @$group),
@@ -234,9 +234,17 @@ sub list_files {
   my ($config, $assignment, $user, $date) = @_;
   my @names = dir_list($config->submissions_dir,
                        $assignment->id, $user->id, $date);
-  map { File->new(name=>$_, size=>-s catfile($config->submissions_dir,
-                    $assignment->id, $user->id, $date, $_)) } @names;
+  map { Tiro::File->new(name=>$_, size=>-s catfile(
+                          $config->submissions_dir,
+                          $assignment->id, $user->id, $date, $_)) } @names;
 }
+
+sub Tiro::Assignment::late_if {
+  my ($assignment, $date) = @_;
+  late_after($assignment) ne "" and $date ge late_after($assignment);
+}
+
+sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 
 =head2 parse_config_file
 
@@ -320,14 +328,5 @@ See http://dev.perl.org/licenses/ for more information.
 
 
 =cut
-
-sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
-
-sub dir_list {
-  opendir(my $d, catdir(@_)) or return ();
-  my @ds = readdir($d);
-  closedir $d;
-  return sort grep {!/^\./} @ds; # skip dot files
-}
 
 1; # End of Tiro::Config

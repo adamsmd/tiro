@@ -22,3 +22,40 @@ for $user ($assignment->dir) {
     copy -r $latest $user
   }
 }
+
+
+
+users = ...
+
+  list_assignments(id) {
+    subs {
+      
+    }
+}
+
+
+
+--after
+--before (late-after)
+
+--flatten
+--section
+
+--dos2unix
+--user
+--verbose
+
+--process [file] ???
+--latest ???
+
+Usage: vcollect [ - adflprsuv ] [assignment-name] [destination-subdirectory]
+
+  +a [YYYY,MM,DD,HH:MM:SS] collect files submitted after the given date
+  ?d [YYYY,MM,DD,HH:MM:SS] use the given due date instead of Vincents
+  *f (flatten) collect only the single latest file renaming as username
+  +l collect the latest submissions ignoring any due date
+  ?p [file] process files after copying
+  +r assume all files are ascii text and reformat them as Unix files
+  +s organize submissions by section number
+  +u [user-name] copy only files for the given user name
+  +v  print information on each file copied.

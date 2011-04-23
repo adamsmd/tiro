@@ -36,7 +36,7 @@ my $start_time = time();
 
 set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})"); # Warning Prefix
 
-my $config = parse_global_config_file(CONFIG_FILE);
+my $config = Tiro->new(CONFIG_FILE);
 
 if ($config->log_file ne "") {
   open(my $LOG_FILE, ">>" . UnixDate("now", $config->log_file)) or
@@ -59,25 +59,22 @@ exists $ENV{$_} and warn("$_: ", $ENV{$_}) for
   ("REMOTE_HOST", "REMOTE_USER", "HTTP_REFERER", "HTTP_X_FORWARDED_FOR");
 warn "PARAM $_: ", join(":",$q->param($_)) for $q->param();
 
-my %real_all_users = parse_user_configs($config);
-
 ################
 # Input Parsing
 ################
 
 # Input formats
-sub date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 sub file { (($_[0] or "") =~ m[^(?:.*[\\/])?([A-Za-z0-9_\. -]+)$])[0]; }
 sub keyword { (($_[0] or "") =~ m[^([A-Za-z0-9_\.-]*)$])[0]; }
 sub bool { $_[0] ? 1 : 0; }
 
 # Basic Inputs
-my $now = date "now";
+my $now = tiro_date "now";
 define_param(
   do_download => \&bool, do_submit => \&bool,
   show_search_form => \&bool, show_submit_form => \&bool,
   show_results => \&bool, show_failed => \&bool, show_group => \&bool,
-  start_date => \&date, end_date => \&date, only_latest => \&bool,
+  start_date => \&tiro_date, end_date => \&tiro_date, only_latest => \&bool,
   reports => \&bool, guards => \&bool, submitted => \&keyword,
   sort_by => \&keyword, user_override => \&keyword);
 use constant {
@@ -88,22 +85,25 @@ use constant {
 # Login
 my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
 
-my $login = my $real_login = $real_all_users{$tainted_user};
+my $login = my $real_login = $config->users()->{$tainted_user};
 panic("No such user: $tainted_user.", "Missing HTTPS?") unless defined $login;
 
 if ($login->is_admin && user_override() ne "") {
-  $login = $real_all_users{user_override()};
+  $login = $config->users()->{user_override()};
   panic("No such user for override: " . user_override()) unless $login;
 }
 
 my @all_users = $login->is_admin ?
-  sort {$a->id cmp $b->id} values %real_all_users : ($login);
-my @all_assignments = $login->is_admin ?
-  list_assignments($config, \%real_all_users, @all_users) : grep { $_->hidden_until le $now } list_assignments($config, \%real_all_users, @all_users);
+  sort {$a->id cmp $b->id} values %{$config->users()} : ($login);
+my @all_assignments =
+  map { $config->assignment($_, @all_users); } dir_list($config->assignments_dir);
+
+@all_assignments = grep { $_->hidden_until le $now } @all_assignments
+  unless $login->is_admin;
 
 # Other inputs
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
-my @users = select_by_id([values %real_all_users], $q->param(USERS));
+my @users = select_by_id([values %{$config->users()}], $q->param(USERS));
 
 my @assignments = select_by_id(
   \@all_assignments, map { file $_ } $q->param(ASSIGNMENTS));
@@ -191,14 +191,13 @@ sub main_view {
     @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
       unless $login->is_admin;
     for my $user (@shown_users) {
-      my @dates = list_submissions(
-        $config, $assignment, show_group() ? @{$assignment->groups->{$user->id}} : ($user));
+      my @dates = $assignment->submissions($user, show_group());
       @dates = grep {start_date() le $_->date} @dates if start_date();
       @dates = grep {end_date() ge $_->date} @dates if end_date();
       @dates = grep {not $_->failed} @dates if not show_failed();
       @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
 
-      push @rows, no_submissions($assignment, $user)
+      push @rows, $assignment->no_submissions($user)
         if submitted() ne SUBMITTED_YES and not @dates;
       push @rows, @dates if submitted() ne SUBMITTED_NO;
     }
@@ -317,7 +316,7 @@ sub panic { # Prints error without navigation components
   print $q->header();
   say $q->start_html(-title=>"Error: " . $config->title);
   say $q->h1("Error: " . $config->title);
-  say $q->p([@_, "(At line ".warn_at_line(@_)." and time ".date("now").".)"]);
+  say $q->p([@_, "(At line ".warn_at_line(@_)." and time ".tiro_date("now").".)"]);
   exit 0;
 }
 
@@ -365,7 +364,7 @@ EOT
   my $user_id = $login->id;
   if ($real_login->is_admin) {
     $user_id = $q->popup_menu(
-      USER_OVERRIDE(), [sort keys %real_all_users], $login->id);
+      USER_OVERRIDE(), [sort keys %{$config->users()}], $login->id);
     $user_id .= $q->submit(-value=>'Change user');
     for ($q->param) {
       $user_id .= "\n" . $q->hidden(-name=>$_, -default=>$q->param($_))
@@ -386,9 +385,8 @@ EOT
   say $q->start_table();
   for my $a (@all_assignments) {
     my $num_done = @{$a->dates};
-    my $num_users = keys %real_all_users;
-    my $late = (late_after($a) ne "" and $now ge late_after($a) and
-                not any {$_->date le late_after($a)} @{$a->dates});
+    my $num_users = keys %{$config->users()};
+    my $late = ($a->late_if($now) and not any {not $_->late} @{$a->dates});
     say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1, SHOW_RESULTS(), 1,
                         SHOW_SUBMIT_FORM(), 1), $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
@@ -477,8 +475,6 @@ sub set_env {
   $ENV{'TIRO_ASSIGNMENT_DUE'} = $assignment->due;
   $ENV{'TIRO_ASSIGNMENT_FILE_COUNT'} = $assignment->file_count;
 }
-
-sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 
 sub filename { catfile($config->submissions_dir, @_); }
 
