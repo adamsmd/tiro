@@ -36,21 +36,21 @@ my $start_time = time();
 
 set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})"); # Warning Prefix
 
-my $config = Tiro->new(CONFIG_FILE);
+my $tiro = Tiro->new(CONFIG_FILE);
 
-if ($config->log_file ne "") {
-  open(my $LOG_FILE, ">>" . UnixDate("now", $config->log_file)) or
-    die "Can't open log file ", $config->log_file, ": $!\n";
+if ($tiro->log_file ne "") {
+  open(my $LOG_FILE, ">>" . UnixDate("now", $tiro->log_file)) or
+    die "Can't open log file ", $tiro->log_file, ": $!\n";
   carpout($LOG_FILE);
 }
 
 warn "+++ Starting tiro.cgi +++";
 END { warn "--- Stopping tiro.cgi ---"; }
 
-$CGI::POST_MAX = $config->max_post_size;
-$ENV{PATH} = $config->path;
+$CGI::POST_MAX = $tiro->max_post_size;
+$ENV{PATH} = $tiro->path;
 my $q = CGI->new;
-panic("Connection limit (@{[$config->max_post_size]} bytes) exceeded.",
+panic("Connection limit (@{[$tiro->max_post_size]} bytes) exceeded.",
       "Submitted file too large?")
   if ($q->cgi_error() || "") =~ /^413/; # 413 POST too large
 panic($q->cgi_error()) if $q->cgi_error();
@@ -83,27 +83,27 @@ use constant {
   SORT_DATE=>'sort_date', SORT_NAME=>'sort_name' };
 
 # Login
-my ($tainted_user) = $config->user_override || $q->remote_user() =~ /^(\w+)\@/;
+my ($tainted_user) = $tiro->user_override || $q->remote_user() =~ /^(\w+)\@/;
 
-my $login = my $real_login = $config->users()->{$tainted_user};
+my $login = my $real_login = $tiro->users()->{$tainted_user};
 panic("No such user: $tainted_user.", "Missing HTTPS?") unless defined $login;
 
 if ($login->is_admin && user_override() ne "") {
-  $login = $config->users()->{user_override()};
+  $login = $tiro->users()->{user_override()};
   panic("No such user for override: " . user_override()) unless $login;
 }
 
 my @all_users = $login->is_admin ?
-  sort {$a->id cmp $b->id} values %{$config->users()} : ($login);
+  sort {$a->id cmp $b->id} values %{$tiro->users()} : ($login);
 my @all_assignments =
-  map { $config->assignment($_, @all_users); } dir_list($config->assignments_dir);
+  map { $tiro->assignment($_, @all_users); } dir_list($tiro->assignments_dir);
 
 @all_assignments = grep { $_->hidden_until le $now } @all_assignments
   unless $login->is_admin;
 
 # Other inputs
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
-my @users = select_by_id([values %{$config->users()}], $q->param(USERS));
+my @users = select_by_id([values %{$tiro->users()}], $q->param(USERS));
 
 my @assignments = select_by_id(
   \@all_assignments, map { file $_ } $q->param(ASSIGNMENTS));
@@ -221,7 +221,7 @@ sub main_view {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($a->id . ": ", $a->title);
       say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
-      say $q->div(scalar(slurp(catfile($config->assignments_dir,                                       $a->text_file))))
+      say $q->div(scalar(slurp(catfile($tiro->assignments_dir,                                       $a->text_file))))
         unless $a->text_file eq "";
       say $q->div($a->text) unless $a->text eq "";
 
@@ -266,7 +266,6 @@ sub main_view {
            ("(Nothing submitted)")));
 
         my ($i) = firstidx {$_} pairwise {(not defined $a) or $a ne $b} @cells, @new_cells;
-#        my $i = firstidx {(not defined $_->[0]) or $_->[0] ne $_->[1]} pairwise {[$a, $b]} @cells, @new_cells;
 # TODO
  
         say "<tr><td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
@@ -302,7 +301,7 @@ sub main_view {
     say $q->end_table();
   }
 
-  say $config->text if not show_submit_form() and not show_results();
+  say $tiro->text if not show_submit_form() and not show_results();
   post_body();
 }
 
@@ -314,8 +313,8 @@ sub warn_at_line { my $x = (caller(1))[2]; warn @_, " at line $x.\n"; $x }
 
 sub panic { # Prints error without navigation components
   print $q->header();
-  say $q->start_html(-title=>"Error: " . $config->title);
-  say $q->h1("Error: " . $config->title);
+  say $q->start_html(-title=>"Error: " . $tiro->title);
+  say $q->h1("Error: " . $tiro->title);
   say $q->p([@_, "(At line ".warn_at_line(@_)." and time ".tiro_date("now").".)"]);
   exit 0;
 }
@@ -329,7 +328,7 @@ sub error { # Prints error with navigation components
 
 sub pre_body {
   print $q->header();
-  say $q->start_html(-title=>$config->title, -style=>{-verbatim=><<'EOT'});
+  say $q->start_html(-title=>$tiro->title, -style=>{-verbatim=><<'EOT'});
   th { vertical-align:top; text-align:left; }
   td { vertical-align:top; }
   h2 { border-bottom:2px solid black; }
@@ -364,7 +363,7 @@ EOT
   my $user_id = $login->id;
   if ($real_login->is_admin) {
     $user_id = $q->popup_menu(
-      USER_OVERRIDE(), [sort keys %{$config->users()}], $login->id);
+      USER_OVERRIDE(), [sort keys %{$tiro->users()}], $login->id);
     $user_id .= $q->submit(-value=>'Change user');
     for ($q->param) {
       $user_id .= "\n" . $q->hidden(-name=>$_, -default=>$q->param($_))
@@ -377,7 +376,7 @@ EOT
               "Welcome $user_id<br>Current time is", pretty_date($now));
   say $q->end_form();
 
-  say $q->h1($config->title);
+  say $q->h1($tiro->title);
 
   say $q->start_div({-class=>'navbar'});
 
@@ -385,7 +384,7 @@ EOT
   say $q->start_table();
   for my $a (@all_assignments) {
     my $num_done = @{$a->dates};
-    my $num_users = keys %{$config->users()};
+    my $num_users = keys %{$tiro->users()};
     my $late = ($a->late_if($now) and not any {not $_->late} @{$a->dates});
     say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1, SHOW_RESULTS(), 1,
                         SHOW_SUBMIT_FORM(), 1), $a->id . ": ", $a->title),
@@ -466,8 +465,8 @@ sub set_env {
   $ENV{'TIRO_SUBMISSION_DIR'} = filename($assignment->id, $user->id, $date);
   $ENV{'TIRO_SUBMISSION_USER'} = $user->id;
   $ENV{'TIRO_SUBMISSION_DATE'} = $date;
-  $ENV{'TIRO_ASSIGNMENT_FILE'} = catfile(
-    $config->assignments_dir, $assignment->path);
+  $ENV{'TIRO_ASSIGNMENT_FILE'} = catfile($tiro->assignments_dir,
+                                         $assignment->path);
 
   $ENV{'TIRO_ASSIGNMENT_ID'} = $assignment->id;
   $ENV{'TIRO_ASSIGNMENT_TITLE'} = $assignment->title;
@@ -476,7 +475,7 @@ sub set_env {
   $ENV{'TIRO_ASSIGNMENT_FILE_COUNT'} = $assignment->file_count;
 }
 
-sub filename { catfile($config->submissions_dir, @_); }
+sub filename { catfile($tiro->submissions_dir, @_); }
 
 sub select_by_id {
   my ($list1, @list2) = @_;
@@ -515,7 +514,7 @@ sub radio { # radio(cgi_key, [value, label], [value, label], ...)
                          -values=>[map { $_->[0] } @_]));
 }
 
-sub pretty_date { UnixDate($_[0], $config->date_format) }
+sub pretty_date { UnixDate($_[0], $tiro->date_format) }
 
 sub href { my $href = shift; $q->a({-href=>$href}, @_); }
 

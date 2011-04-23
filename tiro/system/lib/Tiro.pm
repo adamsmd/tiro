@@ -63,14 +63,14 @@ sub dir_list {
 
 sub tiro_date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 
-struct 'Tiro::GlobalConfig'=>{
+struct 'Tiro::Tiro'=>{
   title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$',
   text=>'$', misc=>'%' };
 struct 'Tiro::User'=>{id=>'$', name=>'$', is_admin=>'$'};
 struct 'Tiro::Assignment'=>{
-  config=>'Tiro::GlobalConfig',
+  tiro=>'Tiro::Tiro',
   id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
   guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
@@ -120,7 +120,7 @@ sub Tiro::new {
     %config = (%config, %c, admins => \@admins, users => \%users);
   }
 
-  my $g = Tiro::GlobalConfig->new(%config, misc=>\%config);
+  my $g = Tiro::Tiro->new(%config, misc=>\%config);
   $g->users({parse_user_configs($g)});
   return $g;
 }
@@ -129,15 +129,15 @@ sub Tiro::new {
 
 =cut
 
-sub Tiro::GlobalConfig::assignment {
-  my ($config, $path, @users) = @_;
+sub Tiro::Tiro::assignment {
+  my ($tiro, $path, @users) = @_;
 
-  my ($id) = $_ =~ $config->assignments_regex;
+  my ($id) = $_ =~ $tiro->assignments_regex;
 
   defined $id or return ();
 
   my @lists = ();
-  my $file = catfile($config->assignments_dir, $path);
+  my $file = catfile($tiro->assignments_dir, $path);
 
   my %file = parse_config_file(
     $file, 'text', 'reports', 'guards', 'groups', @lists);
@@ -148,15 +148,15 @@ sub Tiro::GlobalConfig::assignment {
 
   my @groups = map {[quotewords(qr/\s+/, 0, $_)]} @{$file{'groups'}};
   $file{'groups'} = {};
-  $file{'groups'}->{$_} = [$_] for (keys %{$config->users()});
+  $file{'groups'}->{$_} = [$_] for (keys %{$tiro->users()});
   for my $group (@groups) {
     push @{$file{'groups'}->{$_}}, @$group for (@$group);
   }
   $file{'groups'}->{$_} = [
-    map {$config->users()->{$_}} (sort (uniq(@{$file{'groups'}->{$_}})))]
-    for (keys %{$config->users()});
+    map {$tiro->users()->{$_}} (sort (uniq(@{$file{'groups'}->{$_}})))]
+    for (keys %{$tiro->users()});
 
-  my $assignment = Tiro::Assignment->new(%file, config=>$config, misc=>\%file);
+  my $assignment = Tiro::Assignment->new(%file, tiro=>$tiro, misc=>\%file);
   $assignment->id($id);
   $assignment->path($path);
   $assignment->dates([
@@ -176,11 +176,11 @@ sub Tiro::GlobalConfig::assignment {
 sub drop { @_[$_[0]+1..$#_] }
 
 sub parse_user_configs {
-  my ($global_config) = @_;
+  my ($tiro) = @_;
 
-  my %users = %{$global_config->users};
+  my %users = %{$tiro->users};
 
-  for my $file (@{$global_config->user_files}) {
+  for my $file (@{$tiro->user_files}) {
     my ($header_lines, $id_col, $name_col, $file_name) =
       quotewords(qr/\s+/, 0, $file);
 
@@ -192,7 +192,7 @@ sub parse_user_configs {
     }
   }
 
-  $users{$_}->{'is_admin'} = 1 for @{$global_config->admins};
+  $users{$_}->{'is_admin'} = 1 for @{$tiro->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
   return map { ($_, Tiro::User->new(id => $_, %{$users{$_}})) } (keys %users);
@@ -211,10 +211,10 @@ sub Tiro::Assignment::no_submissions {
 sub Tiro::Assignment::submissions {
   my ($assignment, $user, $group) = @_;
   my @users = $group ? @{$assignment->groups->{$user->id}} : ($user);
-  my $config = $assignment->config();
+  my $tiro = $assignment->tiro();
 
   sort {$a->date cmp $b->date or $a->user->id cmp $b->user->id}
-  grep {-d catfile($config->submissions_dir, $_->assignment->id, $_->user->id,
+  grep {-d catfile($tiro->submissions_dir, $_->assignment->id, $_->user->id,
                    $_->date.$_->failed)}
   map { my $user = $_;
         map { $_ =~ /^(.*?)((\.tmp)?)$/;
@@ -225,17 +225,17 @@ sub Tiro::Assignment::submissions {
                 group_id=>join("\x00", map {$_->id} @$group),
                 group_name=>join("\x00", map {$_->name} @$group),
                 failed=>$2, late=>($1 gt late_after($assignment)),
-                files=>[list_files($config, $assignment, $user, $1.$2)]);
-        } dir_list($config->submissions_dir,$assignment->id,$user->id)
+                files=>[list_files($tiro, $assignment, $user, $1.$2)]);
+        } dir_list($tiro->submissions_dir,$assignment->id,$user->id)
   } @users;
 }
 
 sub list_files {
-  my ($config, $assignment, $user, $date) = @_;
-  my @names = dir_list($config->submissions_dir,
+  my ($tiro, $assignment, $user, $date) = @_;
+  my @names = dir_list($tiro->submissions_dir,
                        $assignment->id, $user->id, $date);
   map { Tiro::File->new(name=>$_, size=>-s catfile(
-                          $config->submissions_dir,
+                          $tiro->submissions_dir,
                           $assignment->id, $user->id, $date, $_)) } @names;
 }
 
