@@ -10,9 +10,9 @@ use constant CONFIG_FILE => 'system/config.cfg';
 use lib 'system/lib';
 
 # Modules from Core
+use Carp qw(verbose);
 use CGI qw(-private_tempfiles -nosticky);
 use CGI::Carp qw(carpout set_progname);
-use Carp qw(verbose);
 use Class::Struct;
 use File::Copy qw(copy move); # NOTE: move() has tainting issues
 use File::Path qw(mkpath);
