@@ -45,7 +45,7 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =cut
 
-our @EXPORT = qw(dir_list tiro_date same_group);
+our @EXPORT = qw(dir_list tiro_date same_group uniq_submissions);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -66,6 +66,11 @@ sub tiro_date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 sub same_group {
   my ($assignment, $user1, $user2) = @_;
   (grep {$user2->id eq $_->id} @{$assignment->groups->{$user1->id}}) ? 1 : 0;
+}
+
+sub uniq_submissions {
+  my %seen;
+  grep { !$seen{$_->assignment->id."\x00".$_->user->id."\x00".$_->date}++} @_;
 }
 
 struct 'Tiro::Tiro'=>{
@@ -137,7 +142,7 @@ sub Tiro::new {
 sub Tiro::Tiro::assignment {
   my ($tiro, $path, @users) = @_;
 
-  my ($id) = $_ =~ $tiro->assignments_regex;
+  my ($id) = $path =~ $tiro->assignments_regex;
 
   defined $id or return ();
 
@@ -178,8 +183,6 @@ sub Tiro::Tiro::assignment {
 
 =cut
 
-sub drop { @_[$_[0]+1..$#_] }
-
 sub parse_user_configs {
   my ($tiro) = @_;
 
@@ -189,7 +192,8 @@ sub parse_user_configs {
     my ($header_lines, $id_col, $name_col, $file_name) =
       quotewords(qr/\s+/, 0, $file);
 
-    for (drop($header_lines || 0, split("\n", slurp $file_name))) {
+    my @lines = split("\n", slurp $file_name);
+    for (@lines[$header_lines || 0..$#lines]) {
       my @words = quotewords(",", 0, $_);
       my $id = $words[$id_col];
       my $name = $words[$name_col];

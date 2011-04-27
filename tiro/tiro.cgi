@@ -180,7 +180,7 @@ sub upload {
 }
 
 sub main_view {
-  my @rows;
+  my @subs;
   for my $assignment (@assignments) {
     my @shown_users = @users ? @users : @all_users;
     @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
@@ -190,24 +190,23 @@ sub main_view {
       @dates = grep {start_date() le $_->date} @dates if start_date();
       @dates = grep {end_date() ge $_->date} @dates if end_date();
       @dates = grep {not $_->failed} @dates if not show_failed();
-      @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
+      @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();
 
-      push @rows, $assignment->no_submissions($user)
+      push @subs, $assignment->no_submissions($user)
         if submitted() ne SUBMITTED_YES and not @dates;
-      push @rows, @dates if submitted() ne SUBMITTED_NO;
+      push @subs, @dates if submitted() ne SUBMITTED_NO;
     }
   }
-  my %seen;
-  @rows = grep { !$seen{$_->assignment->id."\x00".$_->user->id."\x00".$_->date}++} @rows;
+  @subs = uniq_submissions(@subs);
 # TODO
 
-  @rows = sort {
+  @subs = sort {
     (sort_by() eq SORT_USER and $a->group_id cmp $b->group_id)
       or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
       or (sort_by() eq SORT_NAME and $a->group_name cmp $b->group_name)
       or ($a->assignment->id cmp $b->assignment->id)
       or ($a->group_id cmp $b->group_id)
-      or ($a->date cmp $b->date) } @rows;
+      or ($a->date cmp $b->date) } @subs;
 
   pre_body();
 
@@ -217,7 +216,7 @@ sub main_view {
       say $q->start_div({-class=>'assignment'});
       say $q->h2($a->id . ": ", $a->title);
       say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
-      say $q->div(scalar(slurp(catfile($tiro->assignments_dir,                                       $a->text_file))))
+      say $q->div(scalar(slurp(catfile($tiro->assignments_dir, $a->text_file))))
         unless $a->text_file eq "";
       say $q->div({-class=>'assignment_div'}, $a->text) unless $a->text eq "";
 
@@ -242,24 +241,24 @@ sub main_view {
     say $q->start_table({-class=>'submissions'});
     say $q->thead($q->Tr($q->th(["#", "Title", "User", "Name",
                                  "Reports", "Files", "Bytes"])));
-    if (not @rows) {
+    if (not @subs) {
       say row(7, $q->center('No submissions to display.',
                             'Browse or search to select assignment.'));
     } else {
       my @cells = ();
-      for my $r (@rows) {
-        my @url = (ASSIGNMENTS, $r->assignment->id, USERS, $r->user->id,
-                   START_DATE(), $r->date, END_DATE(), $r->date,
-                   SHOW_FAILED(), $r->failed);
-        my $num_files = @{$r->files} || 1;
+      for my $s (@subs) {
+        my @url = (ASSIGNMENTS, $s->assignment->id, USERS, $s->user->id,
+                   START_DATE(), $s->date, END_DATE(), $s->date,
+                   SHOW_FAILED(), $s->failed);
+        my $num_files = @{$s->files} || 1;
         my @new_cells = (
-          $r->assignment->id, $r->assignment->title,
-          join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$r->group}),
-          join("; ",map {$_->name} @{$r->group}),
-          ($r->date ?
+          $s->assignment->id, $s->assignment->title,
+          join("; ",map {$_->id.($_->is_admin?" (admin)":"")} @{$s->group}),
+          join("; ",map {$_->name} @{$s->group}),
+          ($s->date ?
            (href(url(@url, GUARDS(), 1, REPORTS(), 1, SHOW_SUBMISSIONS(), 1),
-                 pretty_date($r->date) . ' [' . $r->user->id . ']') .
-            ($r->late ? " (Late)" : "") . ($r->failed ? " - FAILED" : "")) :
+                 pretty_date($s->date) . ' by ' . $s->user->id) .
+            ($s->late ? " (Late)" : "") . ($s->failed ? " - FAILED" : "")) :
            ("(Nothing submitted)")));
 
         my ($i) = firstidx {$_} pairwise {(not defined $a) or $a ne $b} @cells, @new_cells;
@@ -269,25 +268,27 @@ sub main_view {
         say "<td class='indent' colspan='$i' rowspan='$num_files'></td>" if $i;
         say "<td rowspan='$num_files'>$_</td>" for @new_cells[$i..$#new_cells];
 
-        my @file_rows = @{$r->files} ?
-          map {[href(url(@url, DO_DOWNLOAD(), 1, FILE, $_->name), $_->name),
-                $_->size] } @{$r->files} : ["(No files)", ""];
-        say join("</tr><tr class='submission_file'>", map {$q->td({-class=>'file'}, $_)} @file_rows);
+        say join("</tr><tr class='submission_file'>",
+                 map {$q->td({-class=>'file'}, $_)}
+                 (@{$s->files} ?
+                  map {[href(url(@url, DO_DOWNLOAD(), 1, FILE, $_->name),
+                             $_->name), $_->size] } @{$s->files} :
+                  ["(No files)", ""]));
 
         say "</tr>";
         @cells = @new_cells;
 
-        if ($r->date and (reports() or guards())) {
-          my @programs = ((guards() ? @{$r->assignment->guards} : ()),
-                          (reports() ? @{$r->assignment->reports} : ()));
+        if ($s->date and (reports() or guards())) {
+          my @programs = ((guards() ? @{$s->assignment->guards} : ()),
+                          (reports() ? @{$s->assignment->reports} : ()));
           say '<tr class="report_row"><td class="indent" colspan=2></td>';
-          say '<td colspan=6 class="indent" style="background:rgb(95%,95%,95%);">';
-          say 'Submission ', ($r->failed ? 'FAILED' : 'succeeded');
-          say ' and is ', ($r->late ? 'LATE' : 'on time'), '.';
+          say '<td colspan=6 style="background:rgb(95%,95%,95%);">';
+          say 'Submission ', ($s->failed ? 'FAILED' : 'succeeded');
+          say ' and is ', ($s->late ? 'LATE' : 'on time'), '.';
           say '</td></tr>';
-          set_env($r->assignment, $r->user, $r->date);
+          set_env($s->assignment, $s->user, $s->date);
           for my $program (@programs) {
-            say "<tr class='report_row'><td class='indent' colspan=2></td><td class='indent' colspan=6><div class='report_div'>";
+            say "<tr class='report_row'><td class='indent' colspan=2></td><td colspan=6><div class='report_div'>";
             warn "Running guard or report: $program";
             system $program;
             warn "Exit code: $?";
@@ -355,6 +356,8 @@ sub pre_body {
   .submissions>tbody>TR>td { border-top:solid 1px black; }
   .submissions>tbody>TR>td.indent { border-top: none; }
 
+  .submissions>tbody>TR.report_row>td { border-top: none; }
+
   .submissions>tbody>TR>td.file { border-top: none; }
   .submissions>tbody>TR>td+td.file { border-top:solid 1px black; }
   .submissions>tbody>TR>td.file+td.file { border-top:none; text-align: right; }
@@ -388,8 +391,9 @@ EOT
     my $num_done = @{$a->dates};
     my $num_users = keys %{$tiro->users()};
     my $late = ($a->late_if($now) and not any {not $_->late} @{$a->dates});
-    say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1, SHOW_SUBMISSIONS(), 1,
-                        SHOW_ASSIGNMENTS(), 1), $a->id . ": ", $a->title),
+    say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1,
+                        SHOW_SUBMISSIONS(), 1, SHOW_ASSIGNMENTS(), 1),
+                    $a->id . ": ", $a->title),
             ($num_done ? "&nbsp;&#x2611;" : "&nbsp;&#x2610;") .
             ($login->is_admin ? $q->small("&nbsp;($num_done/$num_users)"):"") .
             ($late ? "&nbsp;Late" : ""));
