@@ -462,6 +462,7 @@ sub post_body {
 
 sub set_env {
   my ($assignment, $user, $date) = @_;
+  warn "Processing " . $assignment->id . " for " . $user->id . " at " . $date;
   $ENV{'TIRO_CONFIG_FILE'} = CONFIG_FILE;
   $ENV{'TIRO_LOGIN_ID'} = $login->id;
   $ENV{'TIRO_LOGIN_IS_ADMIN'} = $login->is_admin;

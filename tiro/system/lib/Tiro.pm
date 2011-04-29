@@ -73,29 +73,18 @@ sub uniq_submissions {
   grep { !$seen{$_->assignment->id."\x00".$_->user->id."\x00".$_->date}++} @_;
 }
 
+=head2 Tiro::Tiro
+
+=cut
+
 struct 'Tiro::Tiro'=>{
   title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$',
   text=>'$', misc=>'%' };
 struct 'Tiro::User'=>{id=>'$', name=>'$', is_admin=>'$'};
-struct 'Tiro::Assignment'=>{
-  tiro=>'Tiro::Tiro',
-  id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
-  text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
-  guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
-struct 'Tiro::Submission'=>{
-  assignment=>'Tiro::Assignment', user=>'Tiro::User',
-  group=>'@', group_id=>'$', group_name=>'$',
-  date=>'$', files=>'@', failed=>'$', late=>'$'};
-struct 'Tiro::File'=>{name=>'$', size=>'$'};
-
-=head2 parse_global_config_file
-
-=cut
-
 sub Tiro::new {
-  my ($tiro, $file, @lists) = @_;
+  my ($tiro_package, $file, @lists) = @_;
 
   my %config = (
     # General Configurations
@@ -130,15 +119,45 @@ sub Tiro::new {
     %config = (%config, %c, admins => \@admins, users => \%users);
   }
 
-  my $g = Tiro::Tiro->new(%config, misc=>\%config);
-  $g->users({parse_user_configs($g)});
-  return $g;
+  my $tiro = Tiro::Tiro->new(%config, misc=>\%config);
+
+  # Parse users
+  my %users = %{$tiro->users};
+
+  for my $file (@{$tiro->user_files}) {
+    my ($header_lines, $id_col, $name_col, $file_name) =
+      quotewords(qr/\s+/, 0, $file);
+
+    my @lines = split("\n", slurp $file_name);
+    for (@lines[$header_lines || 0..$#lines]) {
+      my @words = quotewords(",", 0, $_);
+      my $id = $words[$id_col];
+      my $name = $words[$name_col];
+      $users{$id} = { name => $name } if defined $id and defined $name;
+    }
+  }
+
+  $users{$_}->{'is_admin'} = 1 for @{$tiro->admins};
+  $users{$_}->{'is_admin'} ||= 0 for keys %users;
+
+#  return ;
+
+  $tiro->users({map { ($_, Tiro::User->new(id => $_, %{$users{$_}})) }
+                (keys %users)});
+#parse_user_configs($tiro});
+
+  return $tiro;
 }
 
-=head2 parse_assignment_file
+=head2 Tiro::Assignment
 
 =cut
 
+struct 'Tiro::Assignment'=>{
+  tiro=>'Tiro::Tiro',
+  id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
+  text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
+  guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
 sub Tiro::Tiro::assignment {
   my ($tiro, $path, @users) = @_;
 
@@ -179,34 +198,6 @@ sub Tiro::Tiro::assignment {
   return $assignment;
 }
 
-=head2 parse_user_configs
-
-=cut
-
-sub parse_user_configs {
-  my ($tiro) = @_;
-
-  my %users = %{$tiro->users};
-
-  for my $file (@{$tiro->user_files}) {
-    my ($header_lines, $id_col, $name_col, $file_name) =
-      quotewords(qr/\s+/, 0, $file);
-
-    my @lines = split("\n", slurp $file_name);
-    for (@lines[$header_lines || 0..$#lines]) {
-      my @words = quotewords(",", 0, $_);
-      my $id = $words[$id_col];
-      my $name = $words[$name_col];
-      $users{$id} = { name => $name } if defined $id and defined $name;
-    }
-  }
-
-  $users{$_}->{'is_admin'} = 1 for @{$tiro->admins};
-  $users{$_}->{'is_admin'} ||= 0 for keys %users;
-
-  return map { ($_, Tiro::User->new(id => $_, %{$users{$_}})) } (keys %users);
-}
-
 sub Tiro::Assignment::no_submissions {
   my ($assignment, $user) = @_;
   my $group = $assignment->groups->{$user->id};
@@ -217,6 +208,15 @@ sub Tiro::Assignment::no_submissions {
     group_name=>join("\x00", map {$_->name} @$group));
 }
 
+=head2 Tiro::Submission
+
+=cut
+
+struct 'Tiro::Submission'=>{
+  assignment=>'Tiro::Assignment', user=>'Tiro::User',
+  group=>'@', group_id=>'$', group_name=>'$',
+  date=>'$', files=>'@', failed=>'$', late=>'$'};
+struct 'Tiro::File'=>{name=>'$', size=>'$'};
 sub Tiro::Assignment::submissions {
   my ($assignment, $user, $group) = @_;
   my @users = $group ? @{$assignment->groups->{$user->id}} : ($user);
@@ -250,10 +250,11 @@ sub list_files {
 
 sub Tiro::Assignment::late_if {
   my ($assignment, $date) = @_;
-  late_after($assignment) ne "" and $date ge late_after($assignment);
+  my $x = $assignment->late_after ne "" ? $assignment->late_after : $assignment->due;
+  return $x ne "" and $date ge $x;
 }
 
-sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
+#sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 
 =head2 parse_config_file
 
@@ -286,11 +287,8 @@ Michael D. Adams, C<< <www.cs.indiana.edu/~adamsmd/> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-tiro-config at rt.cpan.org>,
-or through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Tiro-Config>.  I will
-be notified, and then you'll automatically be notified of progress on
-your bug as I make changes.
+Please report any bugs or feature requests to
+C<http://www.cs.indiana.edu/~adamsmd/>.
 
 
 =head1 SUPPORT
@@ -299,27 +297,7 @@ You can find documentation for this module with the perldoc command.
 
     perldoc Tiro::Config
 
-You can also look for information at:
-
-=over 4
-
-=item * RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Tiro-Config>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/Tiro-Config>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Tiro-Config>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/Tiro-Config/>
-
-=back
+You can also look for information at: TODO
 
 
 =head1 ACKNOWLEDGEMENTS

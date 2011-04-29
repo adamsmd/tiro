@@ -41,6 +41,7 @@ $BEFORE = defined $BEFORE ? $BEFORE :
 
 print "A:$AFTER B:$BEFORE\n";
 
+
 #exit 1;
 
 my @subs;
@@ -54,9 +55,10 @@ for my $user (@users) {
 }
 
 for (uniq_submissions(@subs)) {
-  print catfile($tiro->submissions_dir, $_->user->id, $_->date), "\n";
-  print catfile($DEST, join('-', map {$_->id} @{$_->group})), "\n";
-#  copy(catfile(), catfile($DEST, join('-', map {$_->id} $_->group)));
+  system("cp", "--recursive", "--interactive", "--parents",
+         catfile($tiro->submissions_dir, $_->user->id, $_->date . $_->failed),
+         catfile($DEST, join('-', map {$_->id} @{$_->group})));
+  print($? ? "FAILED" : "ok\n");
 }
 
 #cp -r $_->folder, $dates[0]->group->id;

@@ -9,6 +9,7 @@ HTTPS_URL='https://www.cs.indiana.edu/~adamsmd/cgi-pub/tiro/tiro.cgi'
 rm -f tiro/system/log/log-*.txt
 
 cp tiro/tiro.cgi $DST/
+cp tiro/log.cgi $DST/
 cp -r tiro/system $DST
 cp -r tiro/assignments $DST
 cp -r tiro/submissions $DST
