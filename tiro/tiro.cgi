@@ -6,7 +6,7 @@ umask 0077; # Default to private files
 delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)}; # Make %ENV safer
 
 # Configuration
-use constant CONFIG_FILE => 'system/config.cfg';
+use constant CONFIG_FILE => 'system/tiro.cfg';
 use lib 'system/lib';
 
 # Modules from Core

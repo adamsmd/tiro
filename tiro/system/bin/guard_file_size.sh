@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# USAGE: ./system/bin/guard_file_count.sh <MIN BYTES> <MAX BYTES>
+# USAGE: ./system/bin/guard_file_size.sh <MIN BYTES> <MAX BYTES>
 
 LOW="$1"
 HIGH="$2"

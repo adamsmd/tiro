@@ -21,8 +21,7 @@ Future features:
        - title=>'$', text=>'$', hidden_until=>'$', text_file=>'$',
          due=>'$', file_count=>'$', validators=>'@', misc=>'%'
        - body
- - user alias creator
- - submission collector
+ + submission collector
    - all, late, not-late
    - Alternate Heierachry via Soft Links
  - log file interpreter
@@ -67,7 +66,7 @@ Future features:
 
  + Admin sees non-admin view (drop box in user display?)
  + Tiro directories as read only
- - Symlink and collection scripts
+ + Symlink and collection scripts
  + Log filenames with date in them
  + late_after: ...
  + Username in log line

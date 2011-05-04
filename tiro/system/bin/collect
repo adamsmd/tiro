@@ -6,123 +6,119 @@ umask 0077; # Default to private files
 delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)}; # Make %ENV safer
 
 # Configuration
-use constant CONFIG_FILE => 'system/config.cfg';
+use constant CONFIG_FILE => 'system/tiro.cfg';
 use lib 'system/lib';
 
 use Tiro;
+use Carp qw(verbose);
 use File::Copy qw(copy); # NOTE: move() has tainting issues
 use Getopt::Long qw(:config auto_version auto_help);
 use File::Spec::Functions;
+use File::Path qw(mkpath);
+use Pod::Usage;
 
-$main::VERSION=1.0;
-my ($BEFORE, $AFTER, @USERS, @ASSIGNMENTS, $FAILED, $VERBOSE);
-my $GROUP=1;
+$main::VERSION=1.1;
+my ($BEFORE, $AFTER, @USERS, @ASSIGNMENTS, $FAILED, $DRY_RUN);
+my ($VERBOSE, $GROUPS) = (1, 1);
 
 GetOptions('before=s' => \$BEFORE, #default late-after
            'after=s' => \$AFTER, # default none
            'user=s@' => \@USERS, # default all users
-#           'assignment=s@' => \@ASSIGNMENTS,
            'failed!' => \$FAILED, # failed
-           'group!' => \$GROUP,
-           'verbose!', \$VERBOSE);
+           'groups!' => \$GROUPS,
+           'verbose!' => \$VERBOSE,
+           'dry-run!' => \$DRY_RUN);
 
-my ($ASSIGNMENT, $DEST) = @ARGV;
+=head1 SYNOPSIS
+
+collect [options] <assignment-filename> <destination-directory>
+
+B<NOTE:> The assignment is specified as a filename not the assignment name.
+
+=head2 OPTIONS
+
+=item --before=date
+
+    Collect only submissions submitted before this date.  Defaults to the
+    assignment's late_after or due date.
+
+=item --after=date
+
+    Collect only submissions submitted after this date.
+
+=item --user=username
+
+    Collect only submissions for this user.  If repeated, then collect
+    for each user.  If not specified, then collect for all users.
+
+=item --failed, --nofailed (default): Collect failed submissions.
+
+=item --groups (default), --nogroups: Use assignment user groups.
+
+=item --verbose (default), --noverbose: Print verbose output.
+
+=item --dryrun, --nodryrun (default): Don't run commands; just print them.
+
+
+=cut
+
+my ($ASSIGNMENT, $DST) = @ARGV;
+
+pod2usage() unless defined $ASSIGNMENT and defined $DST;
 
 my $tiro = Tiro->new(CONFIG_FILE);
-print "AS: $ASSIGNMENT T:$tiro\n";
 my $assignment = $tiro->assignment($ASSIGNMENT);
 my @users = @USERS ? map {$tiro->users->{$_}} @USERS : values %{$tiro->users};
 
-# TODO: true late_after
+# TODO: assignment name
 $BEFORE = defined $BEFORE ? $BEFORE :
   $assignment->late_after ne '' ? $assignment->late_after : $assignment->due;
-#$AFTER = date($AFTER) if $AFTER;
-#$BEFORE = date($BEFORE) if $BEFORE;
-
-print "A:$AFTER B:$BEFORE\n";
-
-
-#exit 1;
+$AFTER = tiro_date($AFTER) if defined $AFTER and $AFTER ne '';
+$BEFORE = tiro_date($BEFORE) if defined $BEFORE and $BEFORE ne '';
 
 my @subs;
 for my $user (@users) {
-  my @dates = $assignment->submissions($user, $GROUP);
-  #@dates = grep {$BEFORE le $_->date} @dates if $BEFORE ne '';
-  #@dates = grep {$AFTER ge $_->date} @dates if $AFTER ne '';
+  my @dates = $assignment->submissions($user, $GROUPS);
+  @dates = grep {$BEFORE le $_->date} @dates
+    if defined $BEFORE and $BEFORE ne '';
+  @dates = grep {$AFTER ge $_->date} @dates
+    if defined $AFTER and $AFTER ne '';
   @dates = grep {not $_->failed} @dates if not $FAILED;
   @dates = $dates[$#dates] if @dates;
   push @subs, @dates;
 }
 
+print "Ensuring $DST exists.\n" if $VERBOSE;
+mkpath($DST) unless $DRY_RUN;
 for (uniq_submissions(@subs)) {
-  system("cp", "--recursive", "--interactive", "--parents",
-         catfile($tiro->submissions_dir, $_->user->id, $_->date . $_->failed),
-         catfile($DEST, join('-', map {$_->id} @{$_->group})));
-  print($? ? "FAILED" : "ok\n");
+  my $src = catfile($tiro->submissions_dir, $assignment->id,
+                    $_->user->id, $_->date . $_->failed);
+  my $dst = catfile($DST, join('-', map {$_->id} @{$_->group}));
+  print "Copying $src to $dst.\n" if $VERBOSE;
+  system("cp", "--recursive", "--interactive", $src, $dst) unless $DRY_RUN;
 }
 
-#cp -r $_->folder, $dates[0]->group->id;
-
-=end
-
-for $user ($assignment->dir) {
-  my ($latest) = sort {$b cmp $a}
-  grep { not $_->failed }
-  grep { $_ le $LATEST } ($assignment->user->date);
-
-  if (defined $latest) {
-    copy -r $latest $user
-  }
-}
-
-
-my $tiro;
-
-my $assignment(path);
-
-for ($assignment->submissions(user, 1)) {
-      @dates = grep {start_date() le $_->date} @dates if start_date();
-      @dates = grep {end_date() ge $_->date} @dates if end_date();
-      @dates = grep {not $_->failed} @dates if not show_failed();
-      @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();    
-      push;
-}
-
-uniq
-
-cp -r $_->folder, $dates[0]->group->id;
-
-users = ...
-
-  list_assignments(id) {
-    subs {
-      
-    }
-}
-
-
-
---after
---before (late-after)
-
---flatten
---section
-
---dos2unix
---user
---verbose
-
---process [file] ???
---latest ???
-
-Usage: vcollect [ - adflprsuv ] [assignment-name] [destination-subdirectory]
-
-  +a [YYYY,MM,DD,HH:MM:SS] collect files submitted after the given date
-  ?d [YYYY,MM,DD,HH:MM:SS] use the given due date instead of Vincents
-  *f (flatten) collect only the single latest file renaming as username
-  +l collect the latest submissions ignoring any due date
-  ?p [file] process files after copying
-  +r assume all files are ascii text and reformat them as Unix files
-  +s organize submissions by section number
-  +u [user-name] copy only files for the given user name
-  +v  print information on each file copied.
+# --after
+# --before (late-after)
+# 
+# --flatten
+# --section
+# 
+# --dos2unix
+# --user
+# --verbose
+# 
+# --process [file] ???
+# --latest ???
+# 
+# Usage: vcollect [ - adflprsuv ] [assignment-name] [destination-subdirectory]
+# 
+#   +a [YYYY,MM,DD,HH:MM:SS] collect files submitted after the given date
+#   ?d [YYYY,MM,DD,HH:MM:SS] use the given due date instead of Vincents
+#   *f (flatten) collect only the single latest file renaming as username
+#   +l collect the latest submissions ignoring any due date
+#   ?p [file] process files after copying
+#   +r assume all files are ascii text and reformat them as Unix files
+#   +s organize submissions by section number
+#   +u [user-name] copy only files for the given user name
+#   +v  print information on each file copied.

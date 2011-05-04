@@ -29,14 +29,36 @@ our $VERSION = '0.02';
 
 =head1 SYNOPSIS
 
-Quick summary of what the module does.
+This module contains access routines for accessing Tiro assignments and
+submissions.
 
-Perhaps a little code snippet.
+    use Tiro;
 
-    use Tiro::Config;
+    my $tiro = Tiro->new('system/tiro.cfg');
+    $tiro->title # string
+    $tiro->admins # list of string of username
+    $tiro->user_override # string of username
+    $tiro->users # hash from username to Tiro::User
+    $tiro->user_files # list of strings of header lines, id col, name col and filename words
+    $tiro->path # string
+    $tiro->max_post_size # number of bytes
+    $tiro->date_format # string
+    $tiro->log_file # string
+    $tiro->assignments_dir # string of directory
+    $tiro->assignments_regex # string of regex
+    $tiro->submissions_dir # string
+    $tiro->text # string of HTML
 
-    my $foo = Tiro::Config->new();
+    $user->id # string of username
+    $user->name # string of full name
+    $user->is_admin # boolean
+
+    $assignment->tiro # Tiro::Tiro
+    $assignment->id # string
+    $assignment->
     ...
+
+    $submission
 
 =head1 EXPORT
 
@@ -140,11 +162,8 @@ sub Tiro::new {
   $users{$_}->{'is_admin'} = 1 for @{$tiro->admins};
   $users{$_}->{'is_admin'} ||= 0 for keys %users;
 
-#  return ;
-
   $tiro->users({map { ($_, Tiro::User->new(id => $_, %{$users{$_}})) }
                 (keys %users)});
-#parse_user_configs($tiro});
 
   return $tiro;
 }
@@ -254,7 +273,7 @@ sub Tiro::Assignment::late_if {
   return $x ne "" and $date ge $x;
 }
 
-#sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
+sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }
 
 =head2 parse_config_file
 
