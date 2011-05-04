@@ -18,16 +18,12 @@ use File::Path qw(mkpath);
 use Pod::Usage;
 
 $main::VERSION=1.1;
-my ($BEFORE, $AFTER, @USERS, @ASSIGNMENTS, $FAILED, $DRY_RUN);
+my ($BEFORE, $AFTER, @USERS, @ASSIGNMENTS, $FAILED, $DRYRUN);
 my ($VERBOSE, $GROUPS) = (1, 1);
 
-GetOptions('before=s' => \$BEFORE, #default late-after
-           'after=s' => \$AFTER, # default none
-           'user=s@' => \@USERS, # default all users
-           'failed!' => \$FAILED, # failed
-           'groups!' => \$GROUPS,
-           'verbose!' => \$VERBOSE,
-           'dry-run!' => \$DRY_RUN);
+GetOptions('before=s' => \$BEFORE, 'after=s' => \$AFTER, 'user=s@' => \@USERS,
+           'failed!' => \$FAILED, 'groups!' => \$GROUPS,
+           'verbose!' => \$VERBOSE, 'dryrun!' => \$DRYRUN);
 
 =head1 SYNOPSIS
 
@@ -89,36 +85,11 @@ for my $user (@users) {
 }
 
 print "Ensuring $DST exists.\n" if $VERBOSE;
-mkpath($DST) unless $DRY_RUN;
+mkpath($DST) unless $DRYRUN;
 for (uniq_submissions(@subs)) {
   my $src = catfile($tiro->submissions_dir, $assignment->id,
                     $_->user->id, $_->date . $_->failed);
   my $dst = catfile($DST, join('-', map {$_->id} @{$_->group}));
   print "Copying $src to $dst.\n" if $VERBOSE;
-  system("cp", "--recursive", "--interactive", $src, $dst) unless $DRY_RUN;
+  system("cp", "--recursive", "--interactive", $src, $dst) unless $DRYRUN;
 }
-
-# --after
-# --before (late-after)
-# 
-# --flatten
-# --section
-# 
-# --dos2unix
-# --user
-# --verbose
-# 
-# --process [file] ???
-# --latest ???
-# 
-# Usage: vcollect [ - adflprsuv ] [assignment-name] [destination-subdirectory]
-# 
-#   +a [YYYY,MM,DD,HH:MM:SS] collect files submitted after the given date
-#   ?d [YYYY,MM,DD,HH:MM:SS] use the given due date instead of Vincents
-#   *f (flatten) collect only the single latest file renaming as username
-#   +l collect the latest submissions ignoring any due date
-#   ?p [file] process files after copying
-#   +r assume all files are ascii text and reformat them as Unix files
-#   +s organize submissions by section number
-#   +u [user-name] copy only files for the given user name
-#   +v  print information on each file copied.
