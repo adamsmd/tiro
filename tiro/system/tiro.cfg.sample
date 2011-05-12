@@ -2,7 +2,7 @@ title: Tiro Demo
 admins: user1
 user_override: user1
 users: user1 "Demo User #1"
-users_file: 0 0 1 system/users.csv.sample
+user_files: 0 0 1 system/users.csv.sample
 #
 #date_format: %a, %b %d %Y, %r
 #max_post_size: 1000000

@@ -35,6 +35,7 @@ my $now = tiro_date "now"; # When Tiro started (e.g. submission date)
 
 set_progname("tiro.cgi (PID:$$ USER:$ENV{'REMOTE_USER'})"); # Warning Prefix
 
+# TODO: if ! -f CONFIG_FILE: can't load global config, copy tiro.cfg.sample?
 my $tiro = Tiro->new(CONFIG_FILE);
 
 if ($tiro->log_file ne "") {
