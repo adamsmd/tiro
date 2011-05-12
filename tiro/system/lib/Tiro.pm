@@ -7,8 +7,8 @@ use strict;
 use Carp;
 use Class::Struct;
 use Exporter qw(import);
-use Text::ParseWords;
 use File::Spec::Functions;
+use Text::ParseWords;
 
 # Modules not from Core
 use Date::Manip;
@@ -87,6 +87,8 @@ sub tiro_date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
 
 sub same_group {
   my ($assignment, $user1, $user2) = @_;
+  warn "user1:", $user1->id;
+  warn "user2:", $user2->id;
   (grep {$user2->id eq $_->id} @{$assignment->groups->{$user1->id}}) ? 1 : 0;
 }
 
@@ -166,6 +168,35 @@ sub Tiro::new {
                 (keys %users)});
 
   return $tiro;
+}
+
+sub Tiro::Tiro::query {
+  my $tiro = shift;
+  my %x = @_;
+  %x = ('assignments' => [map { $tiro->assignment($_, @{$x{'users'}}) }
+                          dir_list($tiro->assignments_dir)],
+        'users' => [values %{$tiro->users}], 'login' => undef, 'groups' => 1,
+        'start_date' => '', 'end_date' => '', 'failed' => 0,
+        'only_latest' => 0, 'submissions_no' => 0, 'submissions_yes' => 1, %x);
+
+  my @subs;
+  for my $assignment (@{$x{'assignments'}}) {
+    my @shown_users = (defined $x{'login'} and not $x{'login'}->is_admin) ?
+      (grep {same_group($assignment, $x{'login'}, $_)} @{$x{'users'}}) :
+      (@{$x{'users'}});
+    for my $user (@shown_users) {
+      my @dates = $assignment->submissions($user, $x{'groups'});
+      @dates = grep {$x{'start_date'} le $_->date} @dates if $x{'start_date'};
+      @dates = grep {$x{'end_date'} ge $_->date} @dates if $x{'end_date'};
+      @dates = grep {not $_->failed} @dates if not $x{'failed'};
+      @dates = ($dates[$#dates]) if $#dates != -1 and $x{'only_latest'};
+
+      push @subs, $assignment->no_submissions($user)
+        if $x{'submissions_no'} and not @dates;
+      push @subs, @dates if $x{'submissions_yes'};
+    }
+  }
+  return uniq_submissions(@subs);
 }
 
 =head2 Tiro::Assignment

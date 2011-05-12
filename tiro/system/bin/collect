@@ -72,21 +72,14 @@ $BEFORE = defined $BEFORE ? $BEFORE :
 $AFTER = tiro_date($AFTER) if defined $AFTER and $AFTER ne '';
 $BEFORE = tiro_date($BEFORE) if defined $BEFORE and $BEFORE ne '';
 
-my @subs;
-for my $user (@users) {
-  my @dates = $assignment->submissions($user, $GROUPS);
-  @dates = grep {$BEFORE le $_->date} @dates
-    if defined $BEFORE and $BEFORE ne '';
-  @dates = grep {$AFTER ge $_->date} @dates
-    if defined $AFTER and $AFTER ne '';
-  @dates = grep {not $_->failed} @dates if not $FAILED;
-  @dates = $dates[$#dates] if @dates;
-  push @subs, @dates;
-}
+my @subs = $tiro->query(
+  assignments=>[$assignment], users=>[@users], login=>undef, groups=>$GROUPS,
+  start_date=>$AFTER, end_date=>$BEFORE, failed=>$FAILED, only_latest=>1,
+  submissions_yes=>1);
 
 print "Ensuring $DST exists.\n" if $VERBOSE;
 mkpath($DST) unless $DRYRUN;
-for (uniq_submissions(@subs)) {
+for (@subs) {
   my $src = catfile($tiro->submissions_dir, $assignment->id,
                     $_->user->id, $_->date . $_->failed);
   my $dst = catfile($DST, join('-', map {$_->id} @{$_->group}));

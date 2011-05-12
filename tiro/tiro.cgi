@@ -10,6 +10,7 @@ use constant CONFIG_FILE => 'system/tiro.cfg';
 use lib 'system/lib';
 
 # Modules from Core
+use Archive::Tar;
 use Carp qw(verbose);
 use CGI qw(-private_tempfiles -nosticky);
 use CGI::Carp qw(carpout set_progname);
@@ -17,6 +18,7 @@ use Class::Struct;
 use File::Copy qw(copy move); # NOTE: move() has tainting issues
 use File::Path qw(mkpath);
 use File::Spec::Functions;
+use IO::Compress::Gzip qw(gzip $GzipError);
 use Time::HiRes qw(time);
 sub say { print @_, "\n"; } # Emulate Perl 6 feature
 
@@ -70,7 +72,7 @@ sub bool { $_[0] ? 1 : 0; }
 
 # Basic Inputs
 define_param(
-  do_download => \&bool, do_submit => \&bool,
+  do_download => \&bool, do_download_archive => \&bool, do_submit => \&bool,
   show_search_form => \&bool, show_assignments => \&bool,
   show_submissions => \&bool, show_failed => \&bool, show_group => \&bool,
   start_date => \&tiro_date, end_date => \&tiro_date, only_latest => \&bool,
@@ -125,6 +127,7 @@ error('Invalid file names (only "A-Za-z0-9_. -" characters allowed): ',
   error('Duplicate file names: ', join(", ", @x)) unless @x == uniq @x; }
 
 if (do_download()) { download(); }
+elsif (do_download_archive()) { download_archive(); }
 elsif (do_submit()) { upload(); }
 else { main_view(); }
 
@@ -180,34 +183,49 @@ sub upload {
                 START_DATE(), $now, END_DATE(), $now));
 }
 
-sub main_view {
-  my @subs;
-  for my $assignment (@assignments) {
-    my @shown_users = @users ? @users : @all_users;
-    @shown_users = grep {same_group($assignment, $login, $_)} @shown_users
-      unless $login->is_admin;
-    for my $user (@shown_users) {
-      my @dates = $assignment->submissions($user, show_group());
-      @dates = grep {start_date() le $_->date} @dates if start_date();
-      @dates = grep {end_date() ge $_->date} @dates if end_date();
-      @dates = grep {not $_->failed} @dates if not show_failed();
-      @dates = ($dates[$#dates]) if $#dates != -1 and only_latest();
+sub get_subs {
+  return $tiro->query(
+    assignments=>[@assignments], users=>[@users ? @users : @all_users],
+    login=>$login, groups=>scalar show_group(),
+    start_date=>scalar start_date(), end_date=>scalar end_date(),
+    failed=>scalar show_failed(), only_latest=>scalar only_latest(),
+    submissions_no=>(submitted() ne SUBMITTED_YES),
+    submissions_yes=>(submitted() ne SUBMITTED_NO));
+}
 
-      push @subs, $assignment->no_submissions($user)
-        if submitted() ne SUBMITTED_YES and not @dates;
-      push @subs, @dates if submitted() ne SUBMITTED_NO;
+sub download_archive {
+  my $tar = Archive::Tar->new();
+  for my $submission (get_subs()) {
+    for my $file (@{$submission->files}) {
+      $tar->add_data(catfile('submissions', $submission->assignment->id,
+                             join('-', map {$_->id} @{$submission->group}),
+                             $submission->date . $submission->failed,
+                             $file->name),
+                     slurp filename($submission->assignment->id,
+                                    $submission->user->id,
+                                    $submission->date . $submission->failed,
+                                    $file->name))
+        or panic("Failed to compress " . $file->name .
+                 " in " . $submission->assignment->id .
+                 " for ". $submission->user->id . " at " . $submission->date);
     }
   }
-  @subs = uniq_submissions(@subs);
-# TODO
 
-  @subs = sort {
+  my ($tar_data, $gzip_data) = $tar->write();
+  gzip \$tar_data => \$gzip_data or panic("gzip failed: $GzipError");
+  print $q->header(-type=>'application/zip', -attachment=>'submissions.tar.gz',
+                   -Content_length=>length $gzip_data);
+  print $gzip_data;
+}
+
+sub main_view {
+  my @subs = sort {
     (sort_by() eq SORT_USER and $a->group_id cmp $b->group_id)
       or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
       or (sort_by() eq SORT_NAME and $a->group_name cmp $b->group_name)
       or ($a->assignment->id cmp $b->assignment->id)
       or ($a->group_id cmp $b->group_id)
-      or ($a->date cmp $b->date) } @subs;
+      or ($a->date cmp $b->date) } get_subs();
 
   pre_body();
 
@@ -299,6 +317,8 @@ sub main_view {
       }
     }
     say $q->end_table();
+    say $q->small(href(url($q->Vars, DO_DOWNLOAD_ARCHIVE(), 1),
+                       "Archive of listed files"));
   }
 
   say $tiro->text if not show_assignments() and not show_submissions();
@@ -351,7 +371,7 @@ sub pre_body {
   .navbar .hidden_until { color:red; }
 
   .assignment { width:100%;border-bottom:1px solid black;margin-bottom:1.3em; }
-  .submissions { width:100%; border-spacing: 0px; border-bottom:1px solid black; }
+  .submissions { width:100%; border-spacing: 0px; border-bottom:2px solid black; }
   .submissions>thead>TR>th { border-bottom:1px solid black; }
 
   .submissions>tbody>TR>td { border-top:solid 1px black; }
