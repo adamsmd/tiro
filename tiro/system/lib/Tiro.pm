@@ -154,10 +154,11 @@ sub Tiro::new {
 
     my @lines = split("\n", slurp $file_name);
     for (@lines[$header_lines || 0..$#lines]) {
-      my @words = quotewords(",", 0, $_);
-      my $id = $words[$id_col];
-      my $name = $words[$name_col];
-      $users{$id} = { name => $name } if defined $id and defined $name;
+      if ((my @words = quotewords(",", 0, $_)) >= 2) {
+        $words[$id_col] =~ s/(^\s*)|(\s*$)//g;
+        $words[$name_col] =~ s/(^\s*)|(\s*$)//g;
+        $users{$words[$id_col]} = { name => $words[$name_col] };
+      }
     }
   }
 
