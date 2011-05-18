@@ -72,17 +72,16 @@ $BEFORE = defined $BEFORE ? $BEFORE :
 $AFTER = tiro_date($AFTER) if defined $AFTER and $AFTER ne '';
 $BEFORE = tiro_date($BEFORE) if defined $BEFORE and $BEFORE ne '';
 
-my @subs = $tiro->query(
-  assignments=>[$assignment], users=>[@users], login=>undef, groups=>$GROUPS,
-  start_date=>$AFTER, end_date=>$BEFORE, failed=>$FAILED, only_latest=>1,
-  submissions_yes=>1);
-
 print "Ensuring $DST exists.\n" if $VERBOSE;
 mkpath($DST) unless $DRYRUN;
-for (@subs) {
+for ($tiro->query(
+       assignments=>[$assignment], users=>[@users], login=>undef,
+       groups=>$GROUPS, start_date=>$AFTER, end_date=>$BEFORE,
+       failed=>$FAILED, only_latest=>1, submissions_yes=>1)) {
   my $src = catfile($tiro->submissions_dir, $assignment->id,
                     $_->user->id, $_->date . $_->failed);
   my $dst = catfile($DST, join('-', map {$_->id} @{$_->group}));
   print "Copying $src to $dst.\n" if $VERBOSE;
-  system("cp", "--recursive", "--interactive", $src, $dst) unless $DRYRUN;
+  system("cp", "--recursive", "--interactive", $src, $dst) == 0
+    and system("chmod", "-R", "u+wX", $dst) unless $DRYRUN;
 }

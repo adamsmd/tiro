@@ -211,9 +211,9 @@ struct 'Tiro::Assignment'=>{
 sub Tiro::Tiro::assignment {
   my ($tiro, $path, @users) = @_;
 
-  my ($id) = $path =~ $tiro->assignments_regex;
+  my ($id) = join('', $path =~ $tiro->assignments_regex);
 
-  defined $id or return ();
+  $id ne '' or return ();
 
   my @lists = ();
   my $file = catfile($tiro->assignments_dir, $path);
