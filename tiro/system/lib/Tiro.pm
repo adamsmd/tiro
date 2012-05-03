@@ -302,7 +302,7 @@ sub list_files {
 sub Tiro::Assignment::late_if {
   my ($assignment, $date) = @_;
   my $x = $assignment->late_after ne "" ? $assignment->late_after : $assignment->due;
-  return $x ne "" and $date ge $x;
+  return $x ne "" && $date ge $x;
 }
 
 sub late_after { $_[0]->late_after ne "" ? $_[0]->late_after : $_[0]->due; }

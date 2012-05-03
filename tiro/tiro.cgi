@@ -104,7 +104,7 @@ my @all_assignments =
 
 # Other inputs
 use constant {USERS => "users", ASSIGNMENTS => "assignments", FILE => 'file' };
-my @users = select_by_id([values %{$tiro->users()}], $q->param(USERS));
+my @users = select_by_id(\@all_users, $q->param(USERS));
 
 my @assignments = select_by_id(
   \@all_assignments, map { file $_ } $q->param(ASSIGNMENTS));
@@ -508,7 +508,7 @@ sub filename { catfile($tiro->submissions_dir, @_); }
 sub select_by_id {
   my ($list1, @list2) = @_;
   my %a = map {($_,1)} @list2;
-  sort {$a->id cmp $b->id} grep {$a{$_->id}} @{$list1}
+  grep {$a{$_->id}} @{$list1}
 }
 
 ################
