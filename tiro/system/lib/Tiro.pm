@@ -67,7 +67,7 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =cut
 
-our @EXPORT = qw(dir_list tiro_date same_group uniq_submissions);
+our @EXPORT = qw(dir_list tiro_date same_group uniq_submissions cmp_alphanum);
 our @EXPORT_OK = qw();
 
 =head1 SUBROUTINES/METHODS
@@ -76,14 +76,46 @@ our @EXPORT_OK = qw();
 
 =cut
 
+sub dir_find {
+  my ($pred, @dirs) = @_;
+
+  my $dir;
+  opendir(my $d, catdir(@dirs)) or return ();
+  while (my $dir = readdir($d)) {
+    next if $dir =~ m/^\./;
+    (closedir $d and return $dir) if &$pred($dir);
+  }
+
+  closedir $d;
+  return ();
+}
+
 sub dir_list {
   opendir(my $d, catdir(@_)) or return ();
   my @ds = readdir($d);
   closedir $d;
-  return sort grep {!/^\./} @ds; # skip dot files
+  return sort { cmp_alphanum($a, $b) } (grep {!/^\./} @ds); # skip dot files
 }
 
-sub tiro_date { ((UnixDate($_[0], "%O") or "") =~ m[^([A-Za-z0-9:-]+)$])[0]; }
+sub cmp_alphanum {
+  my @a = split /(\d+)/, $_[0];
+  my @b = split /(\d+)/, $_[1];
+  while (1) {
+    #use bigint;
+    my $res =
+      (not @a and -1) ||
+      (not @b and 1) ||
+      ($a[0] =~ /\d/ and $b[0] =~ /\d/ and $a[0] <=> $b[0]) ||
+      ($a[0] cmp $b[0]);
+    return 0+$res if $res;
+    shift @a;
+    shift @b;
+  }
+  return 0;
+}
+
+sub valid_tiro_date { ($_[0] =~ m[^(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d)$])[0] }
+sub tiro_date { valid_tiro_date(UnixDate($_[0], "%O") or "") }
 
 sub same_group {
   my ($assignment, $user1, $user2) = @_;
@@ -206,7 +238,8 @@ sub Tiro::Tiro::query {
 
 struct 'Tiro::Assignment'=>{
   tiro=>'Tiro::Tiro',
-  id=>'$', path=>'$', dates=>'@', title=>'$', hidden_until=>'$',
+  id=>'$', path=>'$', num_late=>'$', num_ontime=>'$',
+  title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
   guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
 sub Tiro::Tiro::assignment {
@@ -239,13 +272,21 @@ sub Tiro::Tiro::assignment {
   my $assignment = Tiro::Assignment->new(%file, tiro=>$tiro, misc=>\%file);
   $assignment->id($id);
   $assignment->path($path);
-  $assignment->dates([
-    map { $_ ? $_ : () }
-    map {
-      firstval {not $_->failed}
-      sort {$a->date cmp $b->date}
-      $assignment->submissions(@{$assignment->groups->{$_->id}})
-    } @users]);
+  $assignment->num_ontime('0');
+  $assignment->num_late('0');
+  for my $user (@users) {
+    if (map { dir_find(sub { $_[0] !~ m[\.tmp$] and
+                               not $assignment->late_if($_[0]) },
+                       $tiro->submissions_dir,$assignment->id,$_->id)
+        } @{$assignment->groups->{$user->id}}) {
+      $assignment->num_ontime(1 + $assignment->num_ontime);
+    } elsif (map { dir_find(sub { $_[0] !~ m[\.tmp$] },
+                       $tiro->submissions_dir,$assignment->id,$_->id)
+        } @{$assignment->groups->{$user->id}}) {
+      $assignment->num_late(1 + $assignment->num_late);
+    }
+  }
+
   return $assignment;
 }
 
@@ -280,7 +321,8 @@ sub Tiro::Assignment::submissions {
         map { $_ =~ /^(.*?)((\.tmp)?)$/;
               my $group = $assignment->groups->{$user->id};
               Tiro::Submission->new(
-                assignment=>$assignment, user=>$user, date=>tiro_date($1),
+                assignment=>$assignment, user=>$user,
+                date=>valid_tiro_date($1),
                 group=>$group,
                 group_id=>join("\x00", map {$_->id} @$group),
                 group_name=>join("\x00", map {$_->name} @$group),

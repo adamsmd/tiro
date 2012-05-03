@@ -223,7 +223,7 @@ sub main_view {
     (sort_by() eq SORT_USER and $a->group_id cmp $b->group_id)
       or (sort_by() eq SORT_DATE and $a->date cmp $b->date)
       or (sort_by() eq SORT_NAME and $a->group_name cmp $b->group_name)
-      or ($a->assignment->id cmp $b->assignment->id)
+      or (cmp_alphanum($a->assignment->id, $b->assignment->id))
       or ($a->group_id cmp $b->group_id)
       or ($a->date cmp $b->date) } get_subs();
 
@@ -409,9 +409,9 @@ EOT
   say $q->h3("Select Assignment");
   say $q->start_table({-class=>'assignment_table'});
   for my $a (@all_assignments) {
-    my $num_done = @{$a->dates};
+    my $num_done = $a->num_late + $a->num_ontime;
     my $num_users = keys %{$tiro->users()};
-    my $late = ($a->late_if($now) and not any {not $_->late} @{$a->dates});
+    my $late = ($a->late_if($now) and $a->num_ontime == 0);
     say row(1, href(url(ASSIGNMENTS, $a->id, SHOW_GROUP(), 1,
                         SHOW_SUBMISSIONS(), 1, SHOW_ASSIGNMENTS(), 1),
                     $a->id . ": ", $a->title),
