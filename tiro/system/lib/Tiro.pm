@@ -119,8 +119,6 @@ sub tiro_date { valid_tiro_date(UnixDate($_[0], "%O") or "") }
 
 sub same_group {
   my ($assignment, $user1, $user2) = @_;
-  warn "user1:", $user1->id;
-  warn "user2:", $user2->id;
   (grep {$user2->id eq $_->id} @{$assignment->groups->{$user1->id}}) ? 1 : 0;
 }
 
