@@ -48,6 +48,7 @@ submissions.
     $tiro->assignments_regex # string of regex
     $tiro->submissions_dir # string
     $tiro->text # string of HTML
+    $tiro->download_inline # regex on filename.  if matches, then downloads are inline
 
     $user->id # string of username
     $user->name # string of full name
@@ -135,7 +136,7 @@ struct 'Tiro::Tiro'=>{
   title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$',
-  text=>'$', misc=>'%' };
+  text=>'$', download_inline=>'$', misc=>'%' };
 struct 'Tiro::User'=>{id=>'$', name=>'$', is_admin=>'$'};
 sub Tiro::new {
   my ($tiro_package, $file, @lists) = @_;
@@ -147,6 +148,7 @@ sub Tiro::new {
     max_post_size => 1000000,
     date_format => '%a, %b %d %Y, %r',
     log_file => 'system/log/log-%Y-%m-%d.txt',
+    download_inline => '^(?!)$',
 
     # Assignment Configurations
     assignments_dir => 'assignments',
@@ -239,7 +241,7 @@ struct 'Tiro::Assignment'=>{
   id=>'$', path=>'$', num_late=>'$', num_ontime=>'$',
   title=>'$', hidden_until=>'$',
   text_file=>'$', due=>'$', late_after=>'$', file_count=>'$', reports=>'@',
-  guards=>'@', text=>'$', groups=>'%' , misc=>'%' };
+  guards=>'@', text=>'$', groups=>'%', download_inline=>'$', misc=>'%' };
 sub Tiro::Tiro::assignment {
   my ($tiro, $path, @users) = @_;
 
@@ -256,6 +258,8 @@ sub Tiro::Tiro::assignment {
   $file{$_} = tiro_date($file{$_}) for ('due', 'late_after', 'hidden_until');
   defined $file{$_} or $file{$_} = "" for (
     'title', 'due', 'late_after', 'hidden_until', 'text_file', 'text', 'file_count');
+  $file{'download_inline'} = $tiro->download_inline
+    unless exists $file{'download_inline'};
 
   my @groups = map {[quotewords(qr/\s+/, 0, $_)]} @{$file{'groups'}};
   $file{'groups'} = {};
