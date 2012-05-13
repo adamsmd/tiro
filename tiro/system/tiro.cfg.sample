@@ -2,15 +2,22 @@ title: Tiro Demo
 admins: user1
 user_override: user1
 users: user1 "Demo User #1"
-user_files: 0 0 1 system/users.csv.sample
+user_files: 1 0 1 system/users.csv
 #
 #date_format: %a, %b %d %Y, %r
 #max_post_size: 1000000
 #log_file: system/log/log-%Y-%m-%d.txt
 #path: /usr/local/bin:/usr/bin:/bin
 #
+## Defaults inherited by assignments
+#default_download_inline: ^(?!)$
+#default_form_file: form_responce.txt
+#default_form_format: ==+== [%k] %l%n%v%n%n
+#
+## Advanced settings (You usually don't want to change these)
+#log_file: system/log/log-%Y-%m-%d.txt
 #assignments_dir: assignments
-#assignments_regex: ^(\w+)\.cfg$
+#assignemnts_regex: ^(\w+)\.cfg$
 #submissions_dir: submissions
 
 <h2>Welcome</h2>
@@ -18,3 +25,4 @@ user_files: 0 0 1 system/users.csv.sample
 Welcome to the Tiro Demo.  This is the welcome text which
 may contain arbitrary <b>HTML</b> and is put inside a &lt;div&gt;.  It
 may also be left blank for a more minimalist look.
+

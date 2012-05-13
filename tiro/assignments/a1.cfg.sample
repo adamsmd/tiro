@@ -3,13 +3,63 @@ due: 2032-02-14T00:00:00
 late_after: 2032-02-14T00:15:00
 hidden_until: 2031-12-31T23:59:59
 file_count: 3
-reports: TODO
-groups: TODO
 guards: ./system/bin/guard_file_count.sh 1 1
 guards: ./system/bin/guard_file_size.sh 1 1000000000
 guards: ./system/bin/guard_file_name.sh 'perl_regex' 'File name message'
+#reports: #Same as guard but doesn't prevent submission
 #text_file: descriptions/a1.html
-tests: Always Pass -- perl -e 'print "Running test on: ", $ARGV[0]' $TIRO_SUBMISSION_DIR
+#groups: user1 user2 user3
+#download_inline: ^.*\.(txt|java)$
+#form_file: form_responces.txt
+#form_format: ==+== [%k] %l%n%v%n%n
+#form_fields: field_1 Field One Label: Text
+#form_fields: field_2 Field Two Label: Password
+#form_fields: field_3 Field Three Label: Checkbox
+#form_fields: field_4 Field Four Label: Radio
+#form_fields: field_5 Field Five Label: Hidden
+#form_fields: field_6 Field Six Label: Select
+#form_fields: field_7 Field Seven Label: Select with Size
+#form_fields: field_8 Field Eight Label: Textarea
 
 This is the assignment text which may contain arbitrary <b>HTML</b>
 and is put inside a &lt;div&gt;.
+
+The &lt;div&gt; is inside the &lt;form%gt; so any %lt;input%gt;
+in the HTML that match a "form_fields" entry will be recorded
+in the "form_file".
+
+<ol>
+<li>Text: <input type="text" name="field_1" />
+
+<li>Password: <input type="password" name="field_2" />
+
+<li>Checkbox:
+<input type="checkbox" name="field_3" value="One"/>
+<input type="checkbox" name="field_3" value="Two"/>
+<input type="checkbox" name="field_3" value="Three"/>
+<input type="checkbox" name="field_3" value="Four"/>
+
+<li>Radio:
+<label><input type="radio" name="field_4" value="option_1" checked="checked" /> Option 1</label>
+<label><input type="radio" name="field_4" value="option_2" /> Option 2</label>
+<label><input type="radio" name="field_4" value="option_3" /> Option 3</label>
+
+<li>Hidden: <input type="hidden" name="field_5" value="Hidden value" />
+
+<li>Select:
+<select name="field_6" >
+<option value="apple">Apples</option>
+<option selected="selected" value="orange">Oranges</option>
+<option value="pear">Pears</option>
+</select>
+
+<li>Select with size:
+<select name="field_7" size="3" multiple="multiple">
+<option value="apple">Apples</option>
+<option selected="selected" value="orange">Oranges</option>
+<option value="pear">Pears</option>
+</select>
+
+<li>Text area: <textarea name="field_8" ></textarea>
+
+</ol>
