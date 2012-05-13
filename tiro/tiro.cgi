@@ -116,7 +116,8 @@ my @upload_files =
 struct FormField=>{key=>'$', label=>'$', value=>'$'};
 my @form_fields =
   map { my ($key, $label) = split(/\s+/, $_, 2);
-        FormField->new(key=>$key, label=>$label || '', value=>join("\n", $q->param($key))) }
+        FormField->new(key=>$key, label=>$label || '',
+                       value=>join("\n", $q->param($key))) }
   (@assignments ? @{$assignments[0]->form_fields} : ());
 
 $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone

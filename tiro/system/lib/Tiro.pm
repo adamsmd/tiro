@@ -136,7 +136,8 @@ struct 'Tiro::Tiro'=>{
   title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$', text=>'$',
-  default_download_inline=>'$', default_form_file=>'$', default_form_format=>'$', misc=>'%' };
+  default_download_inline=>'$', default_form_file=>'$', default_form_format=>'$',
+  misc=>'%' };
 struct 'Tiro::User'=>{id=>'$', name=>'$', is_admin=>'$'};
 sub Tiro::new {
   my ($tiro_package, $file, @lists) = @_;
@@ -243,9 +244,10 @@ sub Tiro::Tiro::query {
 struct 'Tiro::Assignment'=>{
   tiro=>'Tiro::Tiro',
   id=>'$', path=>'$', num_late=>'$', num_ontime=>'$', title=>'$',
-  hidden_until=>'$', text_file=>'$', due=>'$', late_after=>'$',
-  file_count=>'$', form_file=>'$', form_format=>'$', form_fields=>'@', reports=>'@',
-  guards=>'@', text=>'$', groups=>'%', download_inline=>'$', misc=>'%' };
+  hidden_until=>'$', due=>'$', late_after=>'$', text=>'$', text_file=>'$', 
+  file_count=>'$', download_inline=>'$', reports=>'@', guards=>'@',
+  groups=>'%', form_file=>'$', form_format=>'$', form_fields=>'@', 
+  misc=>'%' };
 sub Tiro::Tiro::assignment {
   my ($tiro, $path, @users) = @_;
 
