@@ -113,6 +113,11 @@ my $download = file $q->param(FILE);
 struct UploadFile=>{name=>'$', handle=>'$'};
 my @upload_files =
   map {UploadFile->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
+struct FormField=>{key=>'$', label=>'$', value=>'$'};
+my @form_fields =
+  map { my ($key, $label) = split(/\s+/, $_, 2);
+        FormField->new(key=>$key, label=>$label || '', value=>join("\n", $q->param($key))) }
+  (@assignments ? @{$assignments[0]->form_fields} : ());
 
 $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
 
@@ -164,6 +169,20 @@ sub upload {
     copy($upload_file->handle, catfile($target_dir, $upload_file->name)) or
       error("Can't save @{[$upload_file->name]} in @{[$assignment->id]} " .
             "for @{[$login->id]} at $now: $!");
+  }
+  if (@form_fields) {
+    open(my $form_file, ">" . catfile($target_dir, $assignment->form_file)) or
+      die "Can't open ", catfile($target_dir, $assignment->form_file), ": $!\n";
+    for my $field (@form_fields) {
+      my $text = $assignment->form_format;
+      my %subs = ('k', $field->key,
+                  'l', $field->label,
+                  'v', $field->value,
+                  'n', "\n");
+      $text =~ s[%([klvn])][$subs{$1}]g;
+      print $form_file $text;
+    }
+    close($form_file);
   }
   umask $umask;
   chmod 0500, $target_dir; # lock down the submission directory
@@ -241,19 +260,19 @@ sub main_view {
       say $q->h4("Due by ", pretty_date($a->due)) unless $a->due eq "";
       say $q->div(scalar(slurp(catfile($tiro->assignments_dir, $a->text_file))))
         unless $a->text_file eq "";
+      say $q->start_form(
+        -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
       say $q->div({-class=>'assignment_div'}, $a->text) unless $a->text eq "";
 
-      if ($a->file_count ne "") {
-        say $q->start_form(
-          -method=>'POST', -enctype=>&CGI::MULTIPART, -action=>'#');
+      say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
+        for (1..($a->file_count || 0));
+      if ($a->file_count ne '' || @{$a->form_fields}) {
         say $q->hidden(-name=>USER_OVERRIDE(), -default=>user_override());
         say $q->hidden(-name=>ASSIGNMENTS, -value=>$a->id, -override=>1);
         say $q->hidden(-name=>REPORTS(), -value=>1, -override=>1);
-        say $q->p("File $_:", $q->filefield(-name=>FILE, -override=>1))
-          for (1..$a->file_count);
-        say $q->p($q->submit(DO_SUBMIT(), "Submit"));
-        say $q->end_form();
+        say $q->p($q->submit(DO_SUBMIT(), "Submit"))
       }
+      say $q->end_form();
       say $q->p(); # Add extra space before the final line
       say $q->end_div();
     }
@@ -505,6 +524,7 @@ sub set_env {
   $ENV{'TIRO_ASSIGNMENT_LATE_AFTER'} = $assignment->late_after;
   $ENV{'TIRO_ASSIGNMENT_DUE'} = $assignment->due;
   $ENV{'TIRO_ASSIGNMENT_FILE_COUNT'} = $assignment->file_count;
+  # TODO: other fields: $ENV{'TIRO_ASSIGNMENT_FORM_FIELDS'} = join("\n", @{$assignment->form_fields});
 }
 
 sub filename { catfile($tiro->submissions_dir, @_); }
