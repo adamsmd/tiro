@@ -136,7 +136,7 @@ struct 'Tiro::Tiro'=>{
   title=>'$', admins=>'@', user_override=>'$', users=>'%', user_files=>'@', 
   path=>'$', max_post_size=>'$', date_format=>'$', log_file=>'$',
   assignments_dir=>'$', assignments_regex=>'$', submissions_dir=>'$', text=>'$',
-  default_download_inline=>'$', default_form_file=>'$', default_form_format=>'$',
+  default_inline_regex=>'$', default_form_file=>'$', default_form_format=>'$',
   misc=>'%' };
 struct 'Tiro::User'=>{id=>'$', name=>'$', is_admin=>'$'};
 sub Tiro::new {
@@ -162,7 +162,7 @@ sub Tiro::new {
     user_files=>[],
 
     # Assignment Defaults
-    default_download_inline => '^(?!)$',
+    default_inline_regex => '^(?!)$',
     default_form_file => 'form_responce.txt',
     default_form_format => '==+== [%k] %l%n%v%n%n'
     );
@@ -245,7 +245,7 @@ struct 'Tiro::Assignment'=>{
   tiro=>'Tiro::Tiro',
   id=>'$', path=>'$', num_late=>'$', num_ontime=>'$', title=>'$',
   hidden_until=>'$', due=>'$', late_after=>'$', text=>'$', text_file=>'$', 
-  file_count=>'$', download_inline=>'$', reports=>'@', guards=>'@',
+  file_count=>'$', inline_regex=>'$', reports=>'@', guards=>'@',
   groups=>'%', form_file=>'$', form_format=>'$', form_fields=>'@', 
   misc=>'%' };
 sub Tiro::Tiro::assignment {
@@ -266,7 +266,7 @@ sub Tiro::Tiro::assignment {
     'title', 'due', 'late_after', 'hidden_until',
     'text_file', 'text', 'file_count');
   exists $file{$_} or $file{$_} = $tiro->{"Tiro::Tiro::default_$_"}
-      for ('download_inline', 'form_file', 'form_format');
+      for ('inline_regex', 'form_file', 'form_format');
 
   my @groups = map {[quotewords(qr/\s+/, 0, $_)]} @{$file{'groups'}};
   $file{'groups'} = {};

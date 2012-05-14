@@ -149,7 +149,7 @@ sub download {
   -f $path and -r $path or
     error("Can't get $download in $assignment for $user at @{[start_date()]}");
   print $q->header(-Content_length=>-s $path,
-                   ($download =~ $assignments[0]->download_inline) ?
+                   ($download =~ $assignments[0]->inline_regex) ?
                    (-type=>'text/plain',
                     -Content_disposition=>"inline; filename=\"$download\"") :
                    (-type=>'application/octet-stream',

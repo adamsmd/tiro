@@ -10,7 +10,7 @@ user_files: 1 0 1 system/users.csv
 #path: /usr/local/bin:/usr/bin:/bin
 #
 ## Defaults inherited by assignments
-#default_download_inline: ^(?!)$
+#default_inline_regex: ^(?!)$
 #default_form_file: form_responce.txt
 #default_form_format: ==+== [%k] %l%n%v%n%n
 #

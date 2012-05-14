@@ -9,7 +9,7 @@ guards: ./system/bin/guard_file_name.sh 'perl_regex' 'File name message'
 #reports: #Same as guard but doesn't prevent submission
 #text_file: descriptions/a1.html
 #groups: user1 user2 user3
-#download_inline: ^.*\.(txt|java)$
+#inline_regex: ^.*\.(txt|java)$
 #form_file: form_responces.txt
 #form_format: ==+== [%k] %l%n%v%n%n
 #form_fields: field_1 Field One Label: Text
