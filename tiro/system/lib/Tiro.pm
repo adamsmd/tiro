@@ -98,6 +98,20 @@ sub dir_list {
   return sort { cmp_alphanum($a, $b) } (grep {!/^\./} @ds); # skip dot files
 }
 
+# This should be equivalent to:
+#   sub cmpx { # digits sort before non-digits
+#     my ($x, $y) = @_;
+#     ($x =~ /\d/ and $y =~ /\d/) ? $x <=> $y :
+#     ($x =~ /\d/) ? -1 :
+#     ($y =~ /\d/) ?  1 :
+#     $x cmp $y;
+#   }
+#     
+#   my @a = split /(\d+|\D)/, $_[0];
+#   my @b = split /(\d+|\D)/, $_[1];
+#   reduce { $a || $b } 0, (pairwise { cmpx(($a || ""), ($b || "")); } @a, @b);
+# But the following algorithm doesn't have to search through the
+# entire string if it finds a difference early.
 sub cmp_alphanum {
   my @a = split /(\d+)/, $_[0];
   my @b = split /(\d+)/, $_[1];
