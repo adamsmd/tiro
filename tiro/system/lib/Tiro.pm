@@ -129,8 +129,11 @@ sub cmp_alphanum {
   return 0;
 }
 
-sub valid_tiro_date { ($_[0] =~ m[^(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d)$])[0] }
-sub tiro_date { valid_tiro_date(UnixDate($_[0], "%O") or "") }
+sub tiro_date {
+    my $r = qr[^(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d)$];
+    (UnixDate($_[0], "%O") or "") =~ m/$r/ unless $_[0] =~ m/$r/;
+    return $1;
+}
 
 sub same_group {
   my ($assignment, $user1, $user2) = @_;
@@ -345,7 +348,7 @@ sub Tiro::Assignment::submissions {
               my $group = $assignment->groups->{$user->id};
               Tiro::Submission->new(
                 assignment=>$assignment, user=>$user,
-                date=>valid_tiro_date($1),
+                date=>tiro_date($1),
                 group=>$group,
                 group_id=>join("\x00", map {$_->id} @$group),
                 group_name=>join("\x00", map {$_->name} @$group),
