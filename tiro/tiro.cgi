@@ -111,8 +111,9 @@ my @assignments = select_by_id(
 
 my $download = file $q->param(FILE);
 struct UploadFile=>{name=>'$', handle=>'$'};
+# NOTE: 'name=>file($_)' must come last in case 'file($_)' is 'undef'
 my @upload_files =
-  map {UploadFile->new(name=>file($_), handle=>$_)} ($q->upload(FILE));
+  map {UploadFile->new(handle=>$_, name=>file($_))} ($q->upload(FILE));
 struct FormField=>{key=>'$', label=>'$', value=>'$'};
 my @form_fields =
   map { my ($key, $label) = split(/\s+/, $_, 2);
@@ -128,7 +129,7 @@ $ENV{'TZ'} = Date_TimeZone(); # make reports see the timezone
 
 error('Invalid file names (only "A-Za-z0-9_. -" characters allowed): ',
       join(", ", $q->param(FILE)))
-  unless not any { not defined $_->name } @upload_files;
+  if any { not defined $_->name } @upload_files;
 { my @x = map { $_->name } @upload_files;
   error('Duplicate file names: ', join(", ", @x)) unless @x == uniq @x; }
 
