@@ -115,7 +115,7 @@ sub dir_list {
 sub cmp_alphanum {
   my @a = split /(\d+)/, $_[0];
   my @b = split /(\d+)/, $_[1];
-  while (1) {
+  while (@a or @b) {
     #use bigint;
     my $res =
       (not @a and -1) ||
