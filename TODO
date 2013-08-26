@@ -1,3 +1,43 @@
+user_files -> roster
+
+questions.txt
+form: 5 answer.txt
+question_count: 5
+question_1_label
+question_1_value
+
+inline_downloads: yes/no
+
+
+==+== Question 1: Language
+yes
+
+==+== Question 2
+with long
+text that may wrap
+multiple lines
+
+or even paragraphs
+
+==+== Question 3
+maybe
+
+------------------------------------------------------------------------
+Question 2: no
+
+
+Uncategorized:
+ nested assignment directories
+ instructor feedback
+   via easy cross link to other system?
+ content-type
+ survey:
+   field: --
+   template_file: ---
+   responce_file: ---
+
+
+
 Future features:
 * External
  - Install guide
