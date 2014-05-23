@@ -1,5 +1,6 @@
 #!/bin/sh
 
+set -e
 set -x
 
 AUTH_TYPE="$1"
@@ -14,6 +15,16 @@ rm -f tiro/system/log/log-*.txt
 rm -rf $DST
 
 mkdir -m 755 $DST/
+cat <<EOF >$DST/DIST_INFO
+This directory was created by tiro/dist-prep.sh with the following options:
+
+AUTH_TYPE=$AUTH_TYPE
+AUTH_NAME=$AUTH_NAME
+HTTPS_URL=$HTTPS_URL
+
+Starting work ... (if the next line is not 'Finished!', then there was an err)
+EOF
+chmod 400 $DST/DIST_INFO
 install -m 700 tiro/tiro.cgi $DST/
 install -m 700 tiro/log.cgi $DST/
 
@@ -43,3 +54,16 @@ Require valid-user
 ErrorDocument 403 $HTTPS_URL
 EOF
 chmod 644 $DST/.htaccess
+
+chmod 600 $DST/DIST_INFO
+cat <<EOF >>$DST/DIST_INFO
+... Finished!
+EOF
+chmod 400 $DST/DIST_INFO
+
+set +x
+echo
+echo '  +++++++++++++++'
+echo '  +++ SUCCESS +++'
+echo '  +++++++++++++++'
+echo
